@@ -12,6 +12,7 @@ from core.models import Payment, Ticket, User
 from image_processing.img_analyze import analyze_image, get_base64_image
 from log.logger import logger
 
+
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='@', intents=intents)
