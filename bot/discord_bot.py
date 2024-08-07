@@ -17,7 +17,7 @@ intents.message_content = True
 bot = commands.Bot(command_prefix='@', intents=intents)
 
 
-async def start_http_server() -> None:
+async def start_http_server():
     """Start the HTTP server for health checks."""
     app = web.Application()
     app.router.add_get('/health', health_check)
@@ -25,23 +25,28 @@ async def start_http_server() -> None:
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', 80)
     await site.start()
+    logger.info("HTTP server started for health checks on port 80")
+
 
 
 async def health_check(_) -> web.Response:
     """Health check endpoint for the HTTP server."""
+    logger.info("Health check requested")
     return web.json_response({'status': 'ok'})
 
 
-
 @bot.event
-async def on_ready() -> None:
-    """Log the bot's connection to Discord."""
+async def on_ready():
+    """Log the bot's connection to Discord and start the HTTP server."""
     logger.info(f'{bot.user} has connected to Discord!')
 
     for guild in bot.guilds:
         logger.info(f"Guild: {guild.name} (ID: {guild.id})")
         for role in guild.roles:
             logger.info(f"Role: {role.name} (ID: {role.id})")
+
+    await start_http_server()
+    logger.info("Bot is fully ready and HTTP server is started")
 
 
 @bot.command(name='delete_ticket')
