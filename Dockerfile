@@ -24,5 +24,3 @@ USER myuser
 HEALTHCHECK CMD curl -f http://localhost:80/health || exit 1
 
 COPY Procfile /app/Procfile
-
-ENTRYPOINT ["python", "bot/discord_bot.py"]
