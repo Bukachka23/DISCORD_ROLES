@@ -2,6 +2,7 @@ import os
 from datetime import datetime
 
 import discord
+from aiohttp import web
 from discord.ext import commands
 from dotenv import load_dotenv
 
@@ -14,6 +15,22 @@ from log.logger import logger
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='@', intents=intents)
+
+
+async def start_http_server() -> None:
+    """Start the HTTP server for health checks."""
+    app = web.Application()
+    app.router.add_get('/health', health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 80)
+    await site.start()
+
+
+async def health_check(_) -> web.Response:
+    """Health check endpoint for the HTTP server."""
+    return web.json_response({'status': 'ok'})
+
 
 
 @bot.event

@@ -6,3 +6,4 @@ __pycache__/
 .venv
 discord.log
 .idea
+env_prod

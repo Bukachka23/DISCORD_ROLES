@@ -25,6 +25,11 @@ services:
       - "80:80"
     networks:
       - bot-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 networks:
   bot-network:
