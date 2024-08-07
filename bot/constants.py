@@ -1,0 +1,9 @@
+from enum import Enum
+
+
+class EnvVariables(Enum):
+    DISCORD_BOT_TOKEN = 'DISCORD_BOT_TOKEN'
+    PREMIUM_ROLE_ID = 'PREMIUM_ROLE_ID'
+    OPENAI_API_KEY = 'OPENAI_API_KEY'
+    DATABASE_URL = 'DATABASE_URL'
+
