@@ -1,10 +1,13 @@
 import base64
 import io
 import os
+
 import discord
 import openai
 from dotenv import load_dotenv
 from openai import OpenAI
+
+from log.logger import logger
 
 load_dotenv()
 
@@ -30,7 +33,7 @@ async def analyze_image(message: discord.Message, base64_image: str) -> bool:
                     {"type": "text",
                      "text": "Analyze this image and determine if it shows a successful payment confirmation. The "
                              "image should be contained - order ID, product, quantity, and price. "
-                             "ID, quantity, product and price)"},
+                             "ID, quantity, product and price). At the end you need to write 'successful payment'."},
                     {"type": "text", "text": message.content},
                     {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}
                 ]}
@@ -38,11 +41,11 @@ async def analyze_image(message: discord.Message, base64_image: str) -> bool:
             temperature=0.0,
         )
         response_content = response.choices[0].message.content.lower()
-        print(f"OpenAI response: {response_content}")
+        logger(f"OpenAI response: {response_content}")
 
         if "successful payment" in response_content or "payment was successful" in response_content:
             return True
         return False
     except openai.OpenAIError as e:
-        print(f"OpenAI API error: {e}")
+        logger(f"OpenAI API error: {e}")
         return False

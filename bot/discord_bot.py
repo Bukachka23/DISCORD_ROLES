@@ -1,15 +1,15 @@
-from datetime import datetime
 import os
+from datetime import datetime
+
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
 from bot.constants import EnvVariables
-from core.database import init_db, get_db
-from core.models import User, Ticket, Payment
+from core.database import get_db, init_db
+from core.models import Payment, Ticket, User
 from image_processing.img_analyze import analyze_image, get_base64_image
 from log.logger import logger
-
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -17,7 +17,8 @@ bot = commands.Bot(command_prefix='@', intents=intents)
 
 
 @bot.event
-async def on_ready():
+async def on_ready() -> None:
+    """Log the bot's connection to Discord."""
     logger.info(f'{bot.user} has connected to Discord!')
 
     for guild in bot.guilds:
@@ -27,7 +28,7 @@ async def on_ready():
 
 
 @bot.command(name='delete_ticket')
-async def delete_ticket(ctx):
+async def delete_ticket(ctx) -> None:
     """Delete a ticket for the user."""
     guild = ctx.guild
     member = ctx.author
@@ -39,7 +40,7 @@ async def delete_ticket(ctx):
             await ctx.send(f'{member.mention}, you do not have any tickets.')
             return
 
-        existing_ticket = db.query(Ticket).filter(Ticket.user_id == user.id, Ticket.closed_at == None).first()
+        existing_ticket = db.query(Ticket).filter(Ticket.user_id == user.id, Ticket.closed_at is None).first()
         if not existing_ticket:
             await ctx.send(f'{member.mention}, you do not have any open tickets.')
             return
@@ -61,7 +62,7 @@ async def delete_ticket(ctx):
 
 
 @bot.command(name='create_ticket')
-async def create_ticket(ctx):
+async def create_ticket(ctx: commands.Context) -> None:
     """Create a ticket for the user."""
     guild = ctx.guild
     member = ctx.author
@@ -74,7 +75,7 @@ async def create_ticket(ctx):
             db.add(user)
             db.commit()
 
-        existing_ticket = db.query(Ticket).filter(Ticket.user_id == user.id, Ticket.closed_at == None).first()
+        existing_ticket = db.query(Ticket).filter(Ticket.user_id == user.id, Ticket.closed_at is None).first()
         if existing_ticket:
             ticket_channel = guild.get_channel(int(existing_ticket.channel_id))
             if ticket_channel is None:
@@ -113,7 +114,7 @@ async def create_ticket(ctx):
 
 
 @bot.event
-async def on_message(message):
+async def on_message(message: discord.Message) -> None:
     """Analyze the image for payment confirmation."""
     if message.author == bot.user:
         return
@@ -134,7 +135,7 @@ async def on_message(message):
                         return
 
                     existing_payment = db.query(Payment).filter(Payment.user_id == user.id,
-                                                                Payment.confirmed == True).first()
+                                                                Payment.confirmed).first()
                     if existing_payment:
                         await message.channel.send(
                             f'{message.author.mention}, your payment has already been confirmed. No need to send the '
@@ -182,8 +183,7 @@ async def on_message(message):
 
 if __name__ == '__main__':
     load_dotenv()
-    token = os.getenv(EnvVariables.DISCORD_BOT_TOKEN.value)
     PREMIUM_ROLE_ID = int(os.getenv(EnvVariables.PREMIUM_ROLE_ID.value))
 
     init_db()
-    bot.run(token)
+    bot.run(os.getenv("DISCORD_TOKEN"))
