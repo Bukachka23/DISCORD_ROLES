@@ -28,11 +28,19 @@ async def start_http_server():
     logger.info("HTTP server started for health checks on port 80")
 
 
-
 async def health_check(_) -> web.Response:
     """Health check endpoint for the HTTP server."""
     logger.info("Health check requested")
-    return web.json_response({'status': 'ok'})
+    try:
+        db = next(get_db())
+        db.execute("SELECT 1")
+        db.close()
+        logger.info("Database connection successful")
+        return web.json_response({'status': 'ok'})
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return web.json_response({'status': 'error', 'message': str(e)}, status=500)
+
 
 
 @bot.event
