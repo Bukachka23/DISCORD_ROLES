@@ -4,7 +4,6 @@ services:
   db:
     image: postgres:14
     environment:
-      DATABASE_URL: ${DATABASE_URL}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
@@ -25,7 +24,7 @@ services:
     depends_on:
       - db
     ports:
-      - "8080:80"
+      - "80:80"
     networks:
       - bot-network
     healthcheck:
@@ -33,7 +32,7 @@ services:
       interval: 60s
       timeout: 20s
       retries: 5
-      start_period: 40s
+      start_period: 120s
 
 networks:
   bot-network:
