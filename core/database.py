@@ -14,18 +14,13 @@ database_url = os.getenv(EnvVariables.DATABASE_URL.value)
 
 def create_db_engine():
     try:
-        engine = create_engine(
-            database_url,
-            echo=True,
-            connect_args={
-                "options": f"-c endpoint={database_url.split('@')[1].split('.')[0]}"
-            }
-        )
+        endpoint = database_url.split('@')[1].split('.')[0]
+        new_database_url = f"{database_url}?options=endpoint%3D{endpoint}"
+        engine = create_engine(new_database_url, echo=True)
         return engine
     except SQLAlchemyError as e:
         print(f"Error creating database engine: {str(e)}")
         raise
-
 
 
 engine = create_db_engine()
