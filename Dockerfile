@@ -15,4 +15,4 @@ COPY . .
 
 ENV PYTHONPATH "${PYTHONPATH}:/app"
 
-CMD ["python", "demo/discord_bot.py"]
+CMD ["python", "bot/discord_bot.py"]
