@@ -1,17 +1,18 @@
 import os
 import time
-
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
-
-from bot.constants import EnvVariables
+from sqlalchemy.exc import SQLAlchemyError
 from core.models import Base
+from bot.constants import EnvVariables
 
 load_dotenv()
 
 database_url = os.getenv(EnvVariables.DATABASE_URL.value)
+
+if not database_url:
+    raise ValueError("DATABASE_URL environment variable is not set")
 
 
 def create_db_engine():
@@ -27,23 +28,36 @@ engine = create_db_engine()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
+def test_db_connection():
+    try:
+        with engine.connect() as connection:
+            connection.execute("SELECT 1")
+        print("Database connection successful")
+        return True
+    except SQLAlchemyError as e:
+        print(f"Database connection failed: {str(e)}")
+        return False
+
+
 def init_db() -> None:
     """Create tables in the database."""
     max_retries = 5
     retry_delay = 5
 
     for attempt in range(max_retries):
-        try:
-            Base.metadata.create_all(bind=engine)
-            print("Database tables created successfully")
-            return
-        except SQLAlchemyError as e:
-            print(f"Error creating database tables (Attempt {attempt + 1}/{max_retries}): {str(e)}")
-            if attempt < max_retries - 1:
-                print(f"Retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
-            else:
-                raise ConnectionError("Unable to initialize database after multiple attempts")
+        if test_db_connection():
+            try:
+                Base.metadata.create_all(bind=engine)
+                print("Database tables created successfully")
+                return
+            except SQLAlchemyError as e:
+                print(f"Error creating database tables: {str(e)}")
+                raise
+        else:
+            print(f"Unable to connect to the database. Retrying in {retry_delay} seconds...")
+            time.sleep(retry_delay)
+
+    raise ConnectionError("Unable to initialize database after multiple attempts")
 
 
 def get_db():
