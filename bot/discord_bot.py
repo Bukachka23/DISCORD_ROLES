@@ -2,19 +2,25 @@ import os
 from datetime import datetime
 
 import discord
+import stripe
 from aiohttp import web
 from discord.ext import commands
 from dotenv import load_dotenv
+from stripe import StripeError
 
 from bot.constants import EnvVariables
 from core.database import get_db, init_db
 from core.models import Payment, Ticket, User
-from image_processing.img_analyze import analyze_image, get_base64_image
 from log.logger import logger
-
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.messages = True
+intents.guilds = True
+intents.members = True
+intents.reactions = True
+intents.typing = False
+intents.presences = False
 bot = commands.Bot(command_prefix='@', intents=intents)
 
 
@@ -41,7 +47,6 @@ async def health_check(_) -> web.Response:
     except Exception as e:
         logger.error(f"Health check failed: {str(e)}")
         return web.json_response({'status': 'error', 'message': str(e)}, status=500)
-
 
 
 @bot.event
@@ -71,7 +76,7 @@ async def delete_ticket(ctx) -> None:
             await ctx.send(f'{member.mention}, you do not have any tickets.')
             return
 
-        existing_ticket = db.query(Ticket).filter(Ticket.user_id == user.id, Ticket.closed_at is None).first()
+        existing_ticket = db.query(Ticket).filter(Ticket.user_id == user.id, Ticket.closed_at.is_(None)).first()
         if not existing_ticket:
             await ctx.send(f'{member.mention}, you do not have any open tickets.')
             return
@@ -106,7 +111,7 @@ async def create_ticket(ctx: commands.Context) -> None:
             db.add(user)
             db.commit()
 
-        existing_ticket = db.query(Ticket).filter(Ticket.user_id == user.id, Ticket.closed_at is None).first()
+        existing_ticket = db.query(Ticket).filter(Ticket.user_id == user.id, Ticket.closed_at.is_(None)).first()
         if existing_ticket:
             ticket_channel = guild.get_channel(int(existing_ticket.channel_id))
             if ticket_channel is None:
@@ -144,14 +149,135 @@ async def create_ticket(ctx: commands.Context) -> None:
         db.close()
 
 
+@bot.command(name='check_payment')
+async def check_payment(ctx, payment_intent_id: str = None):
+    """Check the payment status using the provided PaymentIntent ID or image attachment."""
+    if not ctx.message.content.startswith(bot.command_prefix):
+        return
+
+    db = next(get_db())
+    try:
+        user = db.query(User).filter(User.discord_id == str(ctx.author.id)).first()
+        if not user:
+            await ctx.send(f'{ctx.author.mention}, you do not have any tickets.')
+            return
+
+        if not payment_intent_id and not ctx.message.attachments:
+            await ctx.send('Please provide a PaymentIntent ID or attach an image of your payment confirmation.')
+            return
+
+        image_url = None
+        if ctx.message.attachments:
+            attachment = ctx.message.attachments[0]
+            if attachment.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
+                image_url = attachment.url
+            else:
+                await ctx.send('Please attach a valid image file (PNG, JPG, JPEG, WEBP or GIF).')
+                return
+
+        if payment_intent_id:
+            try:
+                payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
+            except StripeError as e:
+                await ctx.send(f'Error retrieving payment status: {str(e)}')
+                logger.error(f"Stripe API error: {str(e)}")
+                return
+
+            if payment_intent.status == 'succeeded':
+                await confirm_payment(ctx, user, db, payment_intent_id, image_url)
+            else:
+                await ctx.send(f'Payment status: {payment_intent.status}. Please ensure your payment was successful.')
+                logger.info(f"Payment status for {ctx.author}: {payment_intent.status}")
+        else:
+            await confirm_payment(ctx, user, db, None, image_url)
+    except Exception as e:
+        logger.error(f"Error checking payment: {str(e)}")
+        await ctx.send('An error occurred while checking the payment. Please try again later.')
+    finally:
+        db.close()
+
+
+async def confirm_payment(ctx, user, db, payment_intent_id, image_url):
+    """Confirm the payment and grant the PREMIUM role."""
+    user.premium = True
+
+    payment = Payment(
+        user_id=user.id,
+        payment_intent_id=payment_intent_id,
+        confirmation_image=image_url,
+        confirmed=True,
+        created_at=datetime.utcnow()
+    )
+    db.add(payment)
+    db.commit()
+
+    premium_role = ctx.guild.get_role(PREMIUM_ROLE_ID)
+    if premium_role:
+        await ctx.author.add_roles(premium_role)
+        await ctx.send(f'Payment confirmed! {ctx.author.mention} has been granted the PREMIUM role.')
+        logger.info(f"Granted PREMIUM role to {ctx.author}")
+
+        await notify_admins(ctx, user, payment_intent_id, image_url)
+    else:
+        await ctx.send('Error: PREMIUM role not found. Please contact an admin.')
+        logger.error(f"PREMIUM role not found. Searched for role ID: {PREMIUM_ROLE_ID}")
+
+
+async def notify_admins(ctx, user, payment_intent_id, image_url):
+    """Notify admins about the new payment confirmation."""
+    admin_channel_id = int(os.getenv(EnvVariables.ADMIN_USER_ID.value))
+
+    admin_channel = ctx.guild.get_channel(admin_channel_id)
+
+    if not admin_channel:
+        for guild in bot.guilds:
+            admin_channel = guild.get_channel(admin_channel_id)
+            if admin_channel:
+                break
+
+    if admin_channel:
+        try:
+            embed = discord.Embed(
+                title="New Payment Confirmation",
+                description=f"User: {ctx.author.mention}\nUser ID: {user.id}",
+                color=discord.Color.green()
+            )
+            if payment_intent_id:
+                embed.add_field(name="Payment Intent ID", value=payment_intent_id)
+            if image_url:
+                embed.set_image(url=image_url)
+
+            await admin_channel.send(embed=embed)
+            logger.info(f"Notified admins about payment confirmation for user {ctx.author}")
+        except discord.errors.Forbidden:
+            logger.error(f"Bot doesn't have permission to send messages in the admin channel (ID: {admin_channel_id})")
+    else:
+        logger.error(f"Admin notification channel not found. Searched for channel ID: {admin_channel_id}")
+
+
+@bot.command(name='payment_help')
+async def payment_help(ctx) -> None:
+    """Provide instructions on how to use the check_payment command."""
+    help_message = (
+        "To check your payment status, use one of the following methods:\n\n"
+        "1. Provide a PaymentIntent ID:\n"
+        "`@check_payment <payment_intent_id>`\n"
+        "Replace `<payment_intent_id>` with your PaymentIntent ID provided during the payment process.\n"
+        "Example: `@check_payment pi_1234567890abcdef`\n\n"
+        "2. Attach an image of your payment confirmation:\n"
+        "Simply use the command `@check_payment` and attach an image to your message."
+    )
+    await ctx.send(help_message)
+
+
 @bot.event
 async def on_message(message: discord.Message) -> None:
-    """Analyze the image for payment confirmation."""
+    """Handle messages in ticket channels."""
     if message.author == bot.user:
         return
 
     if isinstance(message.channel, discord.TextChannel) and message.channel.name.startswith('ticket-'):
-        if message.attachments:
+        if not message.content.startswith(bot.command_prefix):
             db = next(get_db())
             try:
                 user = db.query(User).filter(User.discord_id == str(message.author.id)).first()
@@ -160,49 +286,29 @@ async def on_message(message: discord.Message) -> None:
                 if user:
                     if premium_role in message.author.roles:
                         await message.channel.send(
-                            f'{message.author.mention}, you already have the PREMIUM role. No need to send the image '
-                            f'again.')
+                            f'{message.author.mention}, you already have the PREMIUM role. No need to send payment '
+                            f'confirmation again.')
                         logger.info(f"User {message.author} already has the PREMIUM role.")
                         return
 
-                    existing_payment = db.query(Payment).filter(Payment.user_id == user.id,
-                                                                Payment.confirmed).first()
+                    existing_payment = db.query(Payment).filter(Payment.user_id == user.id, Payment.confirmed).first()
                     if existing_payment:
                         await message.channel.send(
-                            f'{message.author.mention}, your payment has already been confirmed. No need to send the '
-                            f'image again.')
+                            f'{message.author.mention}, your payment has already been confirmed. No need to send '
+                            f'confirmation again.')
                         logger.info(f"User {message.author}'s payment has already been confirmed.")
                         return
 
-                for attachment in message.attachments:
-                    if attachment.content_type.startswith('image/'):
-                        base64_image = await get_base64_image(attachment)
-                        is_payment_successful = await analyze_image(message, base64_image)
-                        if is_payment_successful:
-                            if user:
-                                user.premium = True
-                                payment = Payment(
-                                    user_id=user.id,
-                                    confirmed=True,
-                                    confirmation_image=attachment.url,
-                                    created_at=datetime.utcnow()
-                                )
-                                db.add(payment)
-                                db.commit()
-                            if premium_role:
-                                await message.author.add_roles(premium_role)
-                                await message.channel.send(
-                                    f'Payment confirmed! {message.author.mention} has been granted the PREMIUM role.')
-                                logger.info(f"Granted PREMIUM role to {message.author}")
-                            else:
-                                await message.channel.send('Error: PREMIUM role not found. Please contact an admin.')
-                                logger.error(f"PREMIUM role not found. Searched for role ID: {PREMIUM_ROLE_ID}")
-                        else:
-                            await message.channel.send(
-                                'Payment confirmation not detected. Please try again with a clear image of your '
-                                'payment confirmation.')
-                            logger.warning("Payment confirmation not detected")
-                        break
+                words = message.content.split()
+                payment_intent_id = next((word for word in words if word.startswith('pi_')), None)
+
+                if payment_intent_id or message.attachments:
+                    await check_payment(await bot.get_context(message), payment_intent_id)
+                else:
+                    await message.channel.send(
+                        'Please provide a valid PaymentIntent ID starting with "pi_" or attach an image of your '
+                        'payment confirmation.')
+
             except Exception as e:
                 logger.error(f"Error processing payment: {str(e)}")
                 await message.channel.send('An error occurred while processing the payment. Please contact an admin.')
@@ -215,6 +321,7 @@ async def on_message(message: discord.Message) -> None:
 if __name__ == '__main__':
     load_dotenv()
     PREMIUM_ROLE_ID = int(os.getenv(EnvVariables.PREMIUM_ROLE_ID.value))
+    stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
 
     init_db()
     bot.run(os.getenv("DISCORD_TOKEN"))

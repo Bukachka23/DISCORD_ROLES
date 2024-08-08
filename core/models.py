@@ -28,6 +28,7 @@ class Payment(Base):
     __tablename__ = 'payments'
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id'))
+    payment_intent_id = Column(String, nullable=False)
     confirmed = Column(Boolean, default=False)
     confirmation_image = Column(String)
     created_at = Column(DateTime, nullable=False)
