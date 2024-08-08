@@ -8,6 +8,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-ENV PYTHONPATH "${PYTHONPATH}:/app"
+ENV PYTHONPATH="/app:${PYTHONPATH}"
 
 CMD ["python", "bot/discord_bot.py"]
