@@ -1,16 +1,19 @@
 FROM python:3.11-slim-buster
 
+# Set the working directory
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+# Copy the requirements file
+COPY requirements.txt requirements.txt
 
-COPY requirements.txt .
+# Install the dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
-
+# Copy the rest of the application
 COPY . .
 
-CMD ["python", "./app.py"]
+# Set PYTHONPATH environment variable
+ENV PYTHONPATH "${PYTHONPATH}:/app"
+
+# Run the application
+CMD ["python", "demo/discord_bot.py"]
