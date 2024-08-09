@@ -347,7 +347,7 @@ async def on_message(message: discord.Message) -> None:
 
 if __name__ == '__main__':
     load_dotenv()
-    PREMIUM_ROLE_ID = int(os.getenv(EnvVariables.PREMIUM_ROLE_ID.value))
+    PREMIUM_ROLE_ID = os.getenv(EnvVariables.PREMIUM_ROLE_ID.value)
     stripe.api_key = os.getenv(EnvVariables.STRIPE_SECRET_KEY.value)
 
     init_db()
