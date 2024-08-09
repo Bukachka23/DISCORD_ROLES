@@ -286,7 +286,7 @@ async def payment_help(ctx) -> None:
         "To check your payment status, use one of the following methods:\n\n"
         "1. Call the `@create_payment` command.\n"
         "2. Provide <amount in usd> <currency> <order_id>"
-        "3. Coppy the PaymentIntent ID and use the `@check_payment` command.\n"
+        "3. Copy the PaymentIntent ID and use the `@check_payment` command.\n"
         "4. Provide a PaymentIntent ID:\n"
         "`@check_payment <payment_intent_id>`\n"
         "Replace `<payment_intent_id>` with your PaymentIntent ID provided during the payment process.\n"
@@ -308,7 +308,7 @@ async def on_message(message: discord.Message) -> None:
             db = next(get_db())
             try:
                 user = db.query(User).filter(User.discord_id == str(message.author.id)).first()
-                premium_role = message.guild.get_role(PREMIUM_ROLE_ID)
+                premium_role = message.guild.get_role(EnvVariables.PREMIUM_ROLE_ID.value)
 
                 if user:
                     if premium_role in message.author.roles:
