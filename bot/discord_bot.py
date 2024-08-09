@@ -291,7 +291,7 @@ async def payment_help(ctx) -> None:
         "`@check_payment <payment_intent_id>`\n"
         "Replace `<payment_intent_id>` with your PaymentIntent ID provided during the payment process.\n"
         "Example: `@check_payment pi_1234567890abcdef`\n\n"
-        "2. Attach an image of your payment confirmation:\n"
+        "5. Attach an image of your payment confirmation:\n"
         "Simply use the command `@check_payment` and attach an image to your message."
     )
     await ctx.send(help_message)
