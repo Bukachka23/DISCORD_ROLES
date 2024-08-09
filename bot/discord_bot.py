@@ -1,3 +1,4 @@
+import asyncio
 import os
 from datetime import datetime
 
@@ -97,17 +98,15 @@ async def delete_ticket(ctx) -> None:
         db.close()
 
 
-@bot.command(name='create_ticket')
-async def create_ticket(ctx: commands.Context) -> None:
+async def create_ticket(ctx: commands.Context, user_id: str, amount: int, currency: str, order_id: str) -> None:
     """Create a ticket for the user."""
     guild = ctx.guild
-    member = ctx.author
 
     db = next(get_db())
     try:
-        user = db.query(User).filter(User.discord_id == str(member.id)).first()
+        user = db.query(User).filter(User.discord_id == user_id).first()
         if not user:
-            user = User(discord_id=str(member.id))
+            user = User(discord_id=user_id)
             db.add(user)
             db.commit()
 
@@ -118,18 +117,18 @@ async def create_ticket(ctx: commands.Context) -> None:
                 existing_ticket.deleted_at = datetime.utcnow()
                 db.commit()
             else:
-                await ctx.send(f'{member.mention}, you already have an open ticket: <#{existing_ticket.channel_id}>')
-                logger.info(f"User {member} already has an open ticket: <#{existing_ticket.channel_id}>")
+                await ctx.send(f'<@{user_id}>, you already have an open ticket: <#{existing_ticket.channel_id}>')
+                logger.info(f"User <@{user_id}> already has an open ticket: <#{existing_ticket.channel_id}>")
                 return
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            member: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+            guild.get_member(int(user_id)): discord.PermissionOverwrite(read_messages=True, send_messages=True),
             guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
         }
 
         ticket_channel = await guild.create_text_channel(
-            f'ticket-{member.id}',
+            f'ticket-{user_id}',
             overwrites=overwrites,
             category=discord.utils.get(guild.categories, name='TICKETS')
         )
@@ -138,10 +137,14 @@ async def create_ticket(ctx: commands.Context) -> None:
         db.add(new_ticket)
         db.commit()
 
+        payment_intent = create_payment_intent(amount, currency, order_id)
+
         await ticket_channel.send(
-            f'{member.mention}, your ticket has been created. Please share your payment confirmation here.')
-        await ctx.send(f'{member.mention}, your ticket has been created: {ticket_channel.mention}')
-        logger.info(f"Created ticket channel {ticket_channel.name} for user {member}")
+            f'<@{user_id}>, your ticket has been created. Your PaymentIntent ID is: {payment_intent.id}\n'
+            f'Please share your payment confirmation here.'
+        )
+        await ctx.send(f'<@{user_id}>, your ticket has been created: {ticket_channel.mention}')
+        logger.info(f"Created ticket channel {ticket_channel.name} for user <@{user_id}>")
     except Exception as e:
         logger.error(f"Error creating ticket: {str(e)}")
         await ctx.send("An error occurred while creating the ticket. Please try again later.")
@@ -149,33 +152,42 @@ async def create_ticket(ctx: commands.Context) -> None:
         db.close()
 
 
-@bot.command(name='create_payment')
-async def create_payment(ctx, amount: int, currency: str, order_id: str) -> None:
-    """
-    Create a payment intent and return the PaymentIntent ID.
-    Usage: @create_payment <amount_in_cents> <currency> <order_id>
-    """
-    logger.info(f"Create payment command invoked by {ctx.author}: "
-                f"amount={amount}, "
-                f"currency={currency}, "
-                f"order_id={order_id}")
+async def start_ticket_creation(message: discord.Message):
+    """Start the ticket creation process."""
+    await message.channel.send("Let's create a ticket for you. Please provide the following information:")
+    await message.channel.send("1. Amount (in cents)")
+
+    def check(m):
+        return m.author == message.author and m.channel == message.channel
+
     try:
-        payment_intent = create_payment_intent(amount, currency, order_id)
-        await ctx.send(f"PaymentIntent created successfully. ID: {payment_intent.id}")
-        logger.info(f"PaymentIntent created and sent to user: {payment_intent.id}")
-    except stripe.error.StripeError as e:
-        await ctx.send(f"An error occurred: {str(e)}")
-        logger.error(f"Error in create_payment command: {str(e)}")
+        amount_msg = await bot.wait_for('message', check=check, timeout=60.0)
+        amount = int(amount_msg.content)
+
+        await message.channel.send("2. Currency (e.g., usd)")
+        currency_msg = await bot.wait_for('message', check=check, timeout=60.0)
+        currency = currency_msg.content.lower()
+
+        await message.channel.send("3. Order ID")
+        order_id_msg = await bot.wait_for('message', check=check, timeout=60.0)
+        order_id = order_id_msg.content
+
+        ctx = await bot.get_context(message)
+        await create_ticket(ctx, str(message.author.id), amount, currency, order_id)
+    except asyncio.TimeoutError:
+        await message.channel.send("Ticket creation timed out. Please try again.")
+    except ValueError:
+        await message.channel.send("Invalid amount. Please provide a valid integer for the amount in cents.")
+    except Exception as e:
+        logger.error(f"Error in ticket creation process: {str(e)}")
+        await message.channel.send("An error occurred during ticket creation. Please try again later.")
 
 
-@bot.command(name='check_payment')
 async def check_payment(ctx):
     """
     Check the payment and assign the PREMIUM role based on the provided PaymentIntent ID and image attachment.
     """
-    if not ctx.message.content.startswith(bot.command_prefix):
-        return
-
+    logger.info(f"Checking payment for user {ctx.author}")
     db = next(get_db())
     try:
         user = db.query(User).filter(User.discord_id == str(ctx.author.id)).first()
@@ -201,6 +213,7 @@ async def check_payment(ctx):
             await ctx.send('Please provide a valid PaymentIntent ID starting with "pi_" along with the image.')
             return
 
+        logger.info(f"Calling confirm_payment for user {ctx.author}")
         await confirm_payment(ctx, user, db, payment_intent_id, image_url)
 
     except Exception as e:
@@ -279,75 +292,66 @@ async def notify_admins(ctx, user, payment_intent_id, image_url):
         logger.error(f"Admin notification channel not found. Searched for channel ID: {admin_channel_id}")
 
 
-@bot.command(name='payment_help')
-async def payment_help(ctx) -> None:
-    """Provide instructions on how to use the check_payment command."""
-    help_message = (
-        "To check your payment status, use one of the following methods:\n\n"
-        "1. Call the `@create_payment` command.\n"
-        "2. Provide <amount in usd> <currency> <order_id>"
-        "3. Copy the PaymentIntent ID and use the `@check_payment` command.\n"
-        "4. Provide a PaymentIntent ID:\n"
-        "`@check_payment <payment_intent_id>`\n"
-        "Replace `<payment_intent_id>` with your PaymentIntent ID provided during the payment process.\n"
-        "Example: `@check_payment pi_1234567890abcdef`\n\n"
-        "5. Attach an image of your payment confirmation:\n"
-        "Simply use the command `@check_payment` and attach an image to your message."
-    )
-    await ctx.send(help_message)
-
-
 @bot.event
 async def on_message(message: discord.Message) -> None:
-    """Handle messages in ticket channels."""
+    """Handle messages in ticket channels and detect ticket creation requests."""
     if message.author == bot.user:
         return
 
-    if isinstance(message.channel, discord.TextChannel) and message.channel.name.startswith('ticket-'):
-        if not message.content.startswith(bot.command_prefix):
-            db = next(get_db())
-            try:
-                user = db.query(User).filter(User.discord_id == str(message.author.id)).first()
-                premium_role = message.guild.get_role(EnvVariables.PREMIUM_ROLE_ID.value)
+    if isinstance(message.channel, discord.TextChannel):
+        if message.channel.name.startswith('ticket-'):
+            if not message.content.startswith(bot.command_prefix):
+                logger.info(f"Processing message in ticket channel: {message.content}")
+                db = next(get_db())
+                try:
+                    user = db.query(User).filter(User.discord_id == str(message.author.id)).first()
+                    premium_role_id = int(os.getenv(EnvVariables.PREMIUM_ROLE_ID.value))
+                    premium_role = message.guild.get_role(premium_role_id)
 
-                if user:
-                    if premium_role in message.author.roles:
+                    if user:
+                        if premium_role in message.author.roles:
+                            await message.channel.send(
+                                f'{message.author.mention}, you already have the PREMIUM role. No need to send payment '
+                                f'confirmation again.')
+                            logger.info(f"User {message.author} already has the PREMIUM role.")
+                            return
+
+                        existing_payment = db.query(Payment).filter(Payment.user_id == user.id,
+                                                                    Payment.confirmed).first()
+                        if existing_payment:
+                            await message.channel.send(
+                                f'{message.author.mention}, your payment has already been confirmed. No need to send '
+                                f'confirmation again.')
+                            logger.info(f"User {message.author}'s payment has already been confirmed.")
+                            return
+
+                    words = message.content.split()
+                    payment_intent_id = next((word for word in words if word.startswith('pi_')), None)
+
+                    if payment_intent_id or message.attachments:
+                        logger.info(f"Calling check_payment for user {message.author}")
+                        await check_payment(await bot.get_context(message))
+                    else:
                         await message.channel.send(
-                            f'{message.author.mention}, you already have the PREMIUM role. No need to send payment '
-                            f'confirmation again.')
-                        logger.info(f"User {message.author} already has the PREMIUM role.")
-                        return
+                            'Please provide a valid PaymentIntent ID starting with "pi_" or attach an image of your '
+                            'payment confirmation.')
 
-                    existing_payment = db.query(Payment).filter(Payment.user_id == user.id, Payment.confirmed).first()
-                    if existing_payment:
-                        await message.channel.send(
-                            f'{message.author.mention}, your payment has already been confirmed. No need to send '
-                            f'confirmation again.')
-                        logger.info(f"User {message.author}'s payment has already been confirmed.")
-                        return
-
-                words = message.content.split()
-                payment_intent_id = next((word for word in words if word.startswith('pi_')), None)
-
-                if payment_intent_id or message.attachments:
-                    await check_payment(await bot.get_context(message), payment_intent_id)
-                else:
-                    await message.channel.send(
-                        'Please provide a valid PaymentIntent ID starting with "pi_" or attach an image of your '
-                        'payment confirmation.')
-
-            except Exception as e:
-                logger.error(f"Error processing payment: {str(e)}")
-                await message.channel.send('An error occurred while processing the payment. Please contact an admin.')
-            finally:
-                db.close()
+                except Exception as e:
+                    logger.error(f"Error processing payment: {str(e)}")
+                    await message.channel.send('An error occurred while processing the payment. Please contact an '
+                                               'admin.')
+                finally:
+                    db.close()
+        elif message.content.lower() in ['create ticket', 'open ticket', 'new ticket']:
+            await start_ticket_creation(message)
+            return
 
     await bot.process_commands(message)
 
 
 if __name__ == '__main__':
     load_dotenv()
-    PREMIUM_ROLE_ID = os.getenv(EnvVariables.PREMIUM_ROLE_ID.value)
+    PREMIUM_ROLE_ID = int(os.getenv(EnvVariables.PREMIUM_ROLE_ID.value))
     stripe.api_key = os.getenv(EnvVariables.STRIPE_SECRET_KEY.value)
 
     init_db()
