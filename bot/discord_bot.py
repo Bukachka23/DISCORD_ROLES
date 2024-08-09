@@ -6,10 +6,10 @@ import stripe
 from aiohttp import web
 from discord.ext import commands
 from dotenv import load_dotenv
-from stripe import StripeError
 
 from bot.constants import EnvVariables
 from core.database import get_db, init_db
+from core.helpers import create_payment_intent
 from core.models import Payment, Ticket, User
 from log.logger import logger
 
@@ -149,9 +149,30 @@ async def create_ticket(ctx: commands.Context) -> None:
         db.close()
 
 
+@bot.command(name='create_payment')
+async def create_payment(ctx, amount: int, currency: str, order_id: str) -> None:
+    """
+    Create a payment intent and return the PaymentIntent ID.
+    Usage: @create_payment <amount_in_cents> <currency> <order_id>
+    """
+    logger.info(f"Create payment command invoked by {ctx.author}: "
+                f"amount={amount}, "
+                f"currency={currency}, "
+                f"order_id={order_id}")
+    try:
+        payment_intent = create_payment_intent(amount, currency, order_id)
+        await ctx.send(f"PaymentIntent created successfully. ID: {payment_intent.id}")
+        logger.info(f"PaymentIntent created and sent to user: {payment_intent.id}")
+    except stripe.error.StripeError as e:
+        await ctx.send(f"An error occurred: {str(e)}")
+        logger.error(f"Error in create_payment command: {str(e)}")
+
+
 @bot.command(name='check_payment')
-async def check_payment(ctx, payment_intent_id: str = None):
-    """Check the payment status using the provided PaymentIntent ID or image attachment."""
+async def check_payment(ctx):
+    """
+    Check the payment and assign the PREMIUM role based on the provided PaymentIntent ID and image attachment.
+    """
     if not ctx.message.content.startswith(bot.command_prefix):
         return
 
@@ -162,34 +183,26 @@ async def check_payment(ctx, payment_intent_id: str = None):
             await ctx.send(f'{ctx.author.mention}, you do not have any tickets.')
             return
 
-        if not payment_intent_id and not ctx.message.attachments:
-            await ctx.send('Please provide a PaymentIntent ID or attach an image of your payment confirmation.')
+        words = ctx.message.content.split()
+        payment_intent_id = next((word for word in words if word.startswith('pi_')), None)
+
+        if not ctx.message.attachments:
+            await ctx.send('Please attach an image of your payment confirmation along with the PaymentIntent ID.')
             return
 
-        image_url = None
-        if ctx.message.attachments:
-            attachment = ctx.message.attachments[0]
-            if attachment.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
-                image_url = attachment.url
-            else:
-                await ctx.send('Please attach a valid image file (PNG, JPG, JPEG, WEBP or GIF).')
-                return
+        attachment = ctx.message.attachments[0]
+        if not attachment.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
+            await ctx.send('Please attach a valid image file (PNG, JPG, JPEG, WEBP or GIF).')
+            return
 
-        if payment_intent_id:
-            try:
-                payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
-            except StripeError as e:
-                await ctx.send(f'Error retrieving payment status: {str(e)}')
-                logger.error(f"Stripe API error: {str(e)}")
-                return
+        image_url = attachment.url
 
-            if payment_intent.status == 'succeeded':
-                await confirm_payment(ctx, user, db, payment_intent_id, image_url)
-            else:
-                await ctx.send(f'Payment status: {payment_intent.status}. Please ensure your payment was successful.')
-                logger.info(f"Payment status for {ctx.author}: {payment_intent.status}")
-        else:
-            await confirm_payment(ctx, user, db, None, image_url)
+        if not payment_intent_id:
+            await ctx.send('Please provide a valid PaymentIntent ID starting with "pi_" along with the image.')
+            return
+
+        await confirm_payment(ctx, user, db, payment_intent_id, image_url)
+
     except Exception as e:
         logger.error(f"Error checking payment: {str(e)}")
         await ctx.send('An error occurred while checking the payment. Please try again later.')
@@ -198,7 +211,9 @@ async def check_payment(ctx, payment_intent_id: str = None):
 
 
 async def confirm_payment(ctx, user, db, payment_intent_id, image_url):
-    """Confirm the payment and grant the PREMIUM role."""
+    """
+    Confirm the payment and grant the PREMIUM role.
+    """
     user.premium = True
 
     payment = Payment(
@@ -213,18 +228,27 @@ async def confirm_payment(ctx, user, db, payment_intent_id, image_url):
 
     premium_role = ctx.guild.get_role(PREMIUM_ROLE_ID)
     if premium_role:
-        await ctx.author.add_roles(premium_role)
-        await ctx.send(f'Payment confirmed! {ctx.author.mention} has been granted the PREMIUM role.')
-        logger.info(f"Granted PREMIUM role to {ctx.author}")
-
-        await notify_admins(ctx, user, payment_intent_id, image_url)
+        try:
+            await ctx.author.add_roles(premium_role)
+            await ctx.send(f'Payment confirmed! {ctx.author.mention} has been granted the PREMIUM role.')
+            logger.info(f"Granted PREMIUM role to {ctx.author}")
+        except discord.errors.Forbidden:
+            logger.error(f"Bot doesn't have permission to assign roles for user {ctx.author}")
+            await ctx.send("Error: Bot doesn't have permission to assign roles. Please contact an admin.")
+        except Exception as e:
+            logger.error(f"Error assigning PREMIUM role to {ctx.author}: {str(e)}")
+            await ctx.send("An error occurred while assigning the PREMIUM role. Please contact an admin.")
     else:
         await ctx.send('Error: PREMIUM role not found. Please contact an admin.')
         logger.error(f"PREMIUM role not found. Searched for role ID: {PREMIUM_ROLE_ID}")
 
+    await notify_admins(ctx, user, payment_intent_id, image_url)
+
 
 async def notify_admins(ctx, user, payment_intent_id, image_url):
-    """Notify admins about the new payment confirmation."""
+    """
+    Notify admins about the new payment confirmation.
+    """
     admin_channel_id = int(os.getenv(EnvVariables.ADMIN_USER_ID.value))
 
     admin_channel = ctx.guild.get_channel(admin_channel_id)
@@ -260,7 +284,10 @@ async def payment_help(ctx) -> None:
     """Provide instructions on how to use the check_payment command."""
     help_message = (
         "To check your payment status, use one of the following methods:\n\n"
-        "1. Provide a PaymentIntent ID:\n"
+        "1. Call the `@create_payment` command.\n"
+        "2. Provide <amount in usd> <currency> <order_id>"
+        "3. Coppy the PaymentIntent ID and use the `@check_payment` command.\n"
+        "4. Provide a PaymentIntent ID:\n"
         "`@check_payment <payment_intent_id>`\n"
         "Replace `<payment_intent_id>` with your PaymentIntent ID provided during the payment process.\n"
         "Example: `@check_payment pi_1234567890abcdef`\n\n"
@@ -321,7 +348,7 @@ async def on_message(message: discord.Message) -> None:
 if __name__ == '__main__':
     load_dotenv()
     PREMIUM_ROLE_ID = int(os.getenv(EnvVariables.PREMIUM_ROLE_ID.value))
-    stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+    stripe.api_key = os.getenv(EnvVariables.STRIPE_SECRET_KEY.value)
 
     init_db()
     bot.run(os.getenv("DISCORD_TOKEN"))
