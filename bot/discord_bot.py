@@ -342,7 +342,7 @@ async def on_message(message: discord.Message) -> None:
                                                'admin.')
                 finally:
                     db.close()
-        elif message.content.lower() in ['create ticket', 'open ticket', 'new ticket']:
+        elif message.content.lower() in ['payment verification', 'verify payment']:
             await start_ticket_creation(message)
             return
 
