@@ -1,4 +1,3 @@
-import asyncio
 import os
 from datetime import datetime
 
@@ -8,7 +7,7 @@ from aiohttp import web
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from bot.constants import EnvVariables
+from bot.constants import EnvVariables, TicketState, ticket_info, ticket_states
 from core.database import get_db, init_db
 from core.helpers import create_payment_intent
 from core.models import Payment, Ticket, User
@@ -98,7 +97,7 @@ async def delete_ticket(ctx) -> None:
         db.close()
 
 
-async def create_ticket(ctx: commands.Context, user_id: str, amount: int, currency: str, order_id: str) -> None:
+async def create_ticket(ctx: commands.Context, user_id: str) -> None:
     """Create a ticket for the user."""
     guild = ctx.guild
 
@@ -137,11 +136,11 @@ async def create_ticket(ctx: commands.Context, user_id: str, amount: int, curren
         db.add(new_ticket)
         db.commit()
 
-        payment_intent = create_payment_intent(amount, currency, order_id)
-
         await ticket_channel.send(
-            f'<@{user_id}>, your ticket has been created. Your PaymentIntent ID is: {payment_intent.id}\n'
-            f'Please share your payment confirmation here.'
+            f'<@{user_id}>, your ticket has been created. Please provide the following information:\n'
+            f'1. Amount (in cents)\n'
+            f'2. Currency (e.g., usd)\n'
+            f'3. Order ID'
         )
         await ctx.send(f'<@{user_id}>, your ticket has been created: {ticket_channel.mention}')
         logger.info(f"Created ticket channel {ticket_channel.name} for user <@{user_id}>")
@@ -152,35 +151,55 @@ async def create_ticket(ctx: commands.Context, user_id: str, amount: int, curren
         db.close()
 
 
-async def start_ticket_creation(message: discord.Message):
-    """Start the ticket creation process."""
-    await message.channel.send("Let's create a ticket for you. Please provide the following information:")
-    await message.channel.send("1. Amount (in cents)")
+async def process_ticket_info(message: discord.Message):
+    """Process the ticket information provided by the user."""
+    channel = message.channel
+    author = message.author
 
-    def check(m):
-        return m.author == message.author and m.channel == message.channel
+    if author.id not in ticket_states:
+        ticket_states[author.id] = TicketState.AWAITING_AMOUNT
+        ticket_info[author.id] = {}
+        await channel.send("Please provide the amount (in cents):")
+        return
+
+    state = ticket_states[author.id]
 
     try:
-        amount_msg = await bot.wait_for('message', check=check, timeout=60.0)
-        amount = int(amount_msg.content)
+        if state == TicketState.AWAITING_AMOUNT:
+            amount = int(message.content)
+            ticket_info[author.id]['amount'] = amount
+            ticket_states[author.id] = TicketState.AWAITING_CURRENCY
+            await channel.send("Please provide the currency (e.g., usd):")
+        elif state == TicketState.AWAITING_CURRENCY:
+            currency = message.content.lower()
+            if currency not in ['usd', 'eur', 'gbp']:
+                raise ValueError("Invalid currency")
+            ticket_info[author.id]['currency'] = currency
+            ticket_states[author.id] = TicketState.AWAITING_ORDER_ID
+            await channel.send("Please provide the Order ID:")
+        elif state == TicketState.AWAITING_ORDER_ID:
+            order_id = message.content
+            ticket_info[author.id]['order_id'] = order_id
+            amount = ticket_info[author.id]['amount']
+            currency = ticket_info[author.id]['currency']
+            payment_intent = create_payment_intent(amount, currency, order_id)
+            ticket_states[author.id] = TicketState.AWAITING_PAYMENT_CONFIRMATION
+            await channel.send(
+                f'Your PaymentIntent ID is: {payment_intent.id}\n'
+                f'Please share your payment confirmation here by attaching an image and including the PaymentIntent '
+                f'ID in your message.'
+            )
+        else:
+            await channel.send("Unexpected message. Please wait for further instructions.")
 
-        await message.channel.send("2. Currency (e.g., usd)")
-        currency_msg = await bot.wait_for('message', check=check, timeout=60.0)
-        currency = currency_msg.content.lower()
-
-        await message.channel.send("3. Order ID")
-        order_id_msg = await bot.wait_for('message', check=check, timeout=60.0)
-        order_id = order_id_msg.content
-
-        ctx = await bot.get_context(message)
-        await create_ticket(ctx, str(message.author.id), amount, currency, order_id)
-    except asyncio.TimeoutError:
-        await message.channel.send("Ticket creation timed out. Please try again.")
-    except ValueError:
-        await message.channel.send("Invalid amount. Please provide a valid integer for the amount in cents.")
+    except ValueError as e:
+        await channel.send(f"Invalid input: {str(e)}. Please try again.")
     except Exception as e:
-        logger.error(f"Error in ticket creation process: {str(e)}")
-        await message.channel.send("An error occurred during ticket creation. Please try again later.")
+        logger.error(f"Error in ticket information process: {str(e)}")
+        await channel.send("An error occurred during ticket information collection. Please try again later.")
+        del ticket_states[author.id]
+        if author.id in ticket_info:
+            del ticket_info[author.id]
 
 
 async def check_payment(ctx):
@@ -224,9 +243,6 @@ async def check_payment(ctx):
 
 
 async def confirm_payment(ctx, user, db, payment_intent_id, image_url):
-    """
-    Confirm the payment and grant the PREMIUM role.
-    """
     user.premium = True
 
     payment = Payment(
@@ -239,12 +255,14 @@ async def confirm_payment(ctx, user, db, payment_intent_id, image_url):
     db.add(payment)
     db.commit()
 
-    premium_role = ctx.guild.get_role(PREMIUM_ROLE_ID)
+    premium_role_id = int(os.getenv(EnvVariables.PREMIUM_ROLE_ID.value))
+    premium_role = ctx.guild.get_role(premium_role_id)
+
     if premium_role:
         try:
             await ctx.author.add_roles(premium_role)
             await ctx.send(f'Payment confirmed! {ctx.author.mention} has been granted the PREMIUM role.')
-            logger.info(f"Granted PREMIUM role to {ctx.author}")
+            logger.info(f"Granted PREMIUM role (ID: {premium_role_id}) to {ctx.author}")
         except discord.errors.Forbidden:
             logger.error(f"Bot doesn't have permission to assign roles for user {ctx.author}")
             await ctx.send("Error: Bot doesn't have permission to assign roles. Please contact an admin.")
@@ -253,7 +271,8 @@ async def confirm_payment(ctx, user, db, payment_intent_id, image_url):
             await ctx.send("An error occurred while assigning the PREMIUM role. Please contact an admin.")
     else:
         await ctx.send('Error: PREMIUM role not found. Please contact an admin.')
-        logger.error(f"PREMIUM role not found. Searched for role ID: {PREMIUM_ROLE_ID}")
+        logger.error(f"PREMIUM role not found. Searched for role ID: {premium_role_id}")
+        logger.error(f"Available roles: {[role.name for role in ctx.guild.roles]}")
 
     await notify_admins(ctx, user, payment_intent_id, image_url)
 
@@ -332,9 +351,7 @@ async def on_message(message: discord.Message) -> None:
                         logger.info(f"Calling check_payment for user {message.author}")
                         await check_payment(await bot.get_context(message))
                     else:
-                        await message.channel.send(
-                            'Please provide a valid PaymentIntent ID starting with "pi_" or attach an image of your '
-                            'payment confirmation.')
+                        await process_ticket_info(message)
 
                 except Exception as e:
                     logger.error(f"Error processing payment: {str(e)}")
@@ -343,7 +360,8 @@ async def on_message(message: discord.Message) -> None:
                 finally:
                     db.close()
         elif message.content.lower() in ['payment verification', 'verify payment']:
-            await start_ticket_creation(message)
+            ctx = await bot.get_context(message)
+            await create_ticket(ctx, str(message.author.id))
             return
 
     await bot.process_commands(message)

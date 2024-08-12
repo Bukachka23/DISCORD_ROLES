@@ -1,4 +1,8 @@
 from enum import Enum
+from typing import Any
+
+ticket_states = {}
+ticket_info: dict[int, dict[str, Any]] = {}
 
 
 class EnvVariables(Enum):
@@ -8,3 +12,10 @@ class EnvVariables(Enum):
     DATABASE_URL = 'DATABASE_URL'
     STRIPE_SECRET_KEY = 'STRIPE_SECRET_KEY'
     ADMIN_USER_ID = 'ADMIN_USER_ID'
+
+
+class TicketState(Enum):
+    AWAITING_AMOUNT = 1
+    AWAITING_CURRENCY = 2
+    AWAITING_ORDER_ID = 3
+    AWAITING_PAYMENT_CONFIRMATION = 4
