@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import datetime
 
@@ -8,10 +9,14 @@ from discord.ext import commands
 from dotenv import load_dotenv
 
 from bot.constants import EnvVariables, TicketState, ticket_info, ticket_states
+from config import log_config
 from core.database import get_db, init_db
 from core.helpers import create_payment_intent
 from core.models import Payment, Ticket, User
-from log.logger import logger
+
+
+logger = logging.getLogger(__name__)
+log_config.setup_logging()
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -126,8 +131,9 @@ async def create_ticket(ctx: commands.Context, user_id: str) -> None:
             guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
         }
 
+        member = guild.get_member(int(user_id))
         ticket_channel = await guild.create_text_channel(
-            f'ticket-{user_id}',
+            f'ticket-{member.name}-{member.discriminator}',
             overwrites=overwrites,
             category=discord.utils.get(guild.categories, name='TICKETS')
         )
@@ -318,7 +324,7 @@ async def on_message(message: discord.Message) -> None:
         return
 
     if isinstance(message.channel, discord.TextChannel):
-        if message.channel.name.startswith('ticket-'):
+        if message.channel.name.startswith('ticket-') and '-' in message.channel.name:
             if not message.content.startswith(bot.command_prefix):
                 logger.info(f"Processing message in ticket channel: {message.content}")
                 db = next(get_db())

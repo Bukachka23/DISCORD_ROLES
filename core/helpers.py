@@ -1,6 +1,8 @@
+import logging
+
 import stripe
 
-from log.logger import logger
+logger = logging.getLogger(__name__)
 
 
 def create_payment_intent(amount: int, currency: str, order_id: str) -> dict:
