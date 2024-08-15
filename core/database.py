@@ -19,7 +19,7 @@ def create_db_engine():
         engine = create_engine(database_url, echo=True)
         return engine
     except SQLAlchemyError as e:
-        print(f"Error creating database engine: {str(e)}")
+        print(f"Error creating database engine: {e!s}")
         raise
 
 
@@ -38,7 +38,7 @@ def init_db() -> None:
             print("Database tables created successfully")
             return
         except SQLAlchemyError as e:
-            print(f"Error creating database tables (Attempt {attempt + 1}/{max_retries}): {str(e)}")
+            print(f"Error creating database tables (Attempt {attempt + 1}/{max_retries}): {e!s}")
             if attempt < max_retries - 1:
                 print(f"Retrying in {retry_delay} seconds...")
                 time.sleep(retry_delay)

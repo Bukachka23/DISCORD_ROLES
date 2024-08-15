@@ -19,5 +19,5 @@ def create_payment_intent(amount: int, currency: str, order_id: str) -> dict:
         logger.info(f"PaymentIntent created: {payment_intent.id}")
         return payment_intent
     except stripe.error.StripeError as e:
-        logger.error(f"Error creating PaymentIntent: {str(e)}")
+        logger.error(f"Error creating PaymentIntent: {e!s}")
         raise

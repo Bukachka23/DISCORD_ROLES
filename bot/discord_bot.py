@@ -1,6 +1,7 @@
 import logging
 import os
 from datetime import datetime
+from typing import Any
 
 import discord
 import stripe
@@ -8,7 +9,7 @@ from aiohttp import web
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from bot.constants import EnvVariables, TicketState, ticket_info, ticket_states
+from bot.constants import EnvVariables, TicketState, ticket_info, ticket_states, get_welcome_message
 from config import log_config
 from core.database import get_db, init_db
 from core.helpers import create_payment_intent
@@ -29,7 +30,7 @@ intents.presences = False
 bot = commands.Bot(command_prefix='@', intents=intents)
 
 
-async def start_http_server():
+async def start_http_server() -> None:
     """Start the HTTP server for health checks."""
     app = web.Application()
     app.router.add_get('/health', health_check)
@@ -50,12 +51,12 @@ async def health_check(_) -> web.Response:
         logger.info("Database connection successful")
         return web.json_response({'status': 'ok'})
     except Exception as e:
-        logger.error(f"Health check failed: {str(e)}")
+        logger.error(f"Health check failed: {e!s}")
         return web.json_response({'status': 'error', 'message': str(e)}, status=500)
 
 
 @bot.event
-async def on_ready():
+async def on_ready() -> None:
     """Log the bot's connection to Discord and start the HTTP server."""
     logger.info(f'{bot.user} has connected to Discord!')
 
@@ -69,7 +70,7 @@ async def on_ready():
 
 
 @bot.command(name='delete_ticket')
-async def delete_ticket(ctx) -> None:
+async def delete_ticket(ctx: commands.Context) -> None:
     """Delete a ticket for the user."""
     guild = ctx.guild
     member = ctx.author
@@ -96,7 +97,7 @@ async def delete_ticket(ctx) -> None:
         await ctx.send(f'{member.mention}, your ticket has been deleted.')
         logger.info(f"Deleted ticket channel {ticket_channel.name} for user {member}")
     except Exception as e:
-        logger.error(f"Error deleting ticket: {str(e)}")
+        logger.error(f"Error deleting ticket: {e!s}")
         await ctx.send("An error occurred while deleting the ticket. Please try again later.")
     finally:
         db.close()
@@ -151,13 +152,13 @@ async def create_ticket(ctx: commands.Context, user_id: str) -> None:
         await ctx.send(f'<@{user_id}>, your ticket has been created: {ticket_channel.mention}')
         logger.info(f"Created ticket channel {ticket_channel.name} for user <@{user_id}>")
     except Exception as e:
-        logger.error(f"Error creating ticket: {str(e)}")
+        logger.error(f"Error creating ticket: {e!s}")
         await ctx.send("An error occurred while creating the ticket. Please try again later.")
     finally:
         db.close()
 
 
-async def process_ticket_info(message: discord.Message):
+async def process_ticket_info(message: discord.Message) -> None:
     """Process the ticket information provided by the user."""
     channel = message.channel
     author = message.author
@@ -199,16 +200,16 @@ async def process_ticket_info(message: discord.Message):
             await channel.send("Unexpected message. Please wait for further instructions.")
 
     except ValueError as e:
-        await channel.send(f"Invalid input: {str(e)}. Please try again.")
+        await channel.send(f"Invalid input: {e!s}. Please try again.")
     except Exception as e:
-        logger.error(f"Error in ticket information process: {str(e)}")
+        logger.error(f"Error in ticket information process: {e!s}")
         await channel.send("An error occurred during ticket information collection. Please try again later.")
         del ticket_states[author.id]
         if author.id in ticket_info:
             del ticket_info[author.id]
 
 
-async def check_payment(ctx):
+async def check_payment(ctx: commands.Context) -> None:
     """
     Check the payment and assign the PREMIUM role based on the provided PaymentIntent ID and image attachment.
     """
@@ -242,13 +243,23 @@ async def check_payment(ctx):
         await confirm_payment(ctx, user, db, payment_intent_id, image_url)
 
     except Exception as e:
-        logger.error(f"Error checking payment: {str(e)}")
+        logger.error(f"Error checking payment: {e!s}")
         await ctx.send('An error occurred while checking the payment. Please try again later.')
     finally:
         db.close()
 
 
-async def confirm_payment(ctx, user, db, payment_intent_id, image_url):
+async def send_welcome_message(ctx: commands.Context, days: int = 30) -> None:
+    """Send a welcome message to the user after confirming the payment."""
+    welcome_message = get_welcome_message(ctx.author.name, days)
+    await ctx.send(welcome_message)
+
+
+async def confirm_payment(ctx: commands.Context,
+                          user: User,
+                          db: Any,
+                          payment_intent_id: str,
+                          image_url: str) -> None:
     user.premium = True
 
     payment = Payment(
@@ -269,11 +280,13 @@ async def confirm_payment(ctx, user, db, payment_intent_id, image_url):
             await ctx.author.add_roles(premium_role)
             await ctx.send(f'Payment confirmed! {ctx.author.mention} has been granted the PREMIUM role.')
             logger.info(f"Granted PREMIUM role (ID: {premium_role_id}) to {ctx.author}")
+
+            await send_welcome_message(ctx)
         except discord.errors.Forbidden:
             logger.error(f"Bot doesn't have permission to assign roles for user {ctx.author}")
             await ctx.send("Error: Bot doesn't have permission to assign roles. Please contact an admin.")
         except Exception as e:
-            logger.error(f"Error assigning PREMIUM role to {ctx.author}: {str(e)}")
+            logger.error(f"Error assigning PREMIUM role to {ctx.author}: {e!s}")
             await ctx.send("An error occurred while assigning the PREMIUM role. Please contact an admin.")
     else:
         await ctx.send('Error: PREMIUM role not found. Please contact an admin.')
@@ -283,7 +296,10 @@ async def confirm_payment(ctx, user, db, payment_intent_id, image_url):
     await notify_admins(ctx, user, payment_intent_id, image_url)
 
 
-async def notify_admins(ctx, user, payment_intent_id, image_url):
+async def notify_admins(ctx: commands.Context,
+                        user: User,
+                        payment_intent_id: str,
+                        image_url: str) -> None:
     """
     Notify admins about the new payment confirmation.
     """
@@ -360,7 +376,7 @@ async def on_message(message: discord.Message) -> None:
                         await process_ticket_info(message)
 
                 except Exception as e:
-                    logger.error(f"Error processing payment: {str(e)}")
+                    logger.error(f"Error processing payment: {e!s}")
                     await message.channel.send('An error occurred while processing the payment. Please contact an '
                                                'admin.')
                 finally:
