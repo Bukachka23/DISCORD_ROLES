@@ -45,6 +45,5 @@ Also, did you subscribe to Sherlock's YouTube? (This way you can support him if 
 """
 
 
-
 def get_welcome_message(username, days):
     return WELCOME_MESSAGE.format(username=username, days=days)

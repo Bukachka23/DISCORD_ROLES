@@ -9,8 +9,16 @@ class User(Base):
     __tablename__ = 'users'
     id = Column(Integer, primary_key=True)
     discord_id = Column(String, unique=True, nullable=False)
+    user_id = Column(Integer, unique=True, nullable=True)
+    username = Column(String, nullable=True)
+    subscription_start = Column(DateTime, nullable=True)
+    subscription_end = Column(DateTime, nullable=True)
     premium = Column(Boolean, default=False)
     tickets = relationship("Ticket", back_populates="user")
+
+    def set_subscription(self, subscription):
+        self.subscription_start = subscription.start_date
+        self.subscription_end = subscription.end_date
 
 
 class Ticket(Base):
