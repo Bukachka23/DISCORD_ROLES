@@ -1,3 +1,4 @@
+import asyncio
 import logging.config
 
 import discord
@@ -70,3 +71,14 @@ class DiscordBot(commands.Bot):
         else:
             await ctx.author.send(f"An error occurred: {error!s}")
             self.logger.error("An error occurred: %s", error, exc_info=True)
+
+    @commands.Cog.listener()
+    async def on_command_error(self, ctx, error):
+        if isinstance(error, commands.CommandInvokeError):
+            if isinstance(error.original, asyncio.TimeoutError):
+                await ctx.send("The command timed out. Please try again.")
+            else:
+                await ctx.send(f"An error occurred: {error.original}")
+        else:
+            await ctx.send(f"An error occurred: {error}")
+

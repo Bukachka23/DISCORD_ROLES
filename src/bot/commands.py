@@ -1,3 +1,4 @@
+import asyncio
 import logging.config
 import os
 from datetime import datetime, timedelta
@@ -35,25 +36,37 @@ class CommandHandler(commands.Cog):
         def check(m):
             return m.author == ctx.author and isinstance(m.channel, discord.DMChannel)
 
-        try:
-            email_msg = await self.bot.wait_for('message', check=check, timeout=60.0)
-            email = email_msg.content
-            customer = get_customer_by_email(email)
-            if not customer:
-                await ctx.author.send("No customer found with the email.")
-                return
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                email_msg = await self.bot.wait_for('message', check=check, timeout=120.0)
+                email = email_msg.content
+                customer = get_customer_by_email(email)
+                if not customer:
+                    await ctx.author.send("No customer found with the email.")
+                    return
 
-            subscription = get_active_subscription(customer)
-            if not subscription:
-                await ctx.author.send("No active subscription found for the customer.")
-                return
+                subscription = get_active_subscription(customer)
+                if not subscription:
+                    await ctx.author.send("No active subscription found for the customer.")
+                    return
 
-            remaining_days = calculate_remaining_days(subscription)
-            await ctx.author.send(f"You have {remaining_days} days left on your subscription.")
-            logger.info(f"User {ctx.author.id} has {remaining_days} days left on subscription")
-        except Exception as e:
-            await ctx.author.send(f"An error occurred: {e!s}")
-            logger.error(f"Error in check_subscription for user {ctx.author.id}: {e!s}", exc_info=True)
+                remaining_days = calculate_remaining_days(subscription)
+                await ctx.author.send(f"You have {remaining_days} days left on your subscription.")
+                logger.info(f"User {ctx.author.id} has {remaining_days} days left on subscription")
+                break
+            except asyncio.TimeoutError:
+                if attempt < max_retries - 1:
+                    await ctx.author.send(
+                        f"You didn't respond in time. You have {max_retries - attempt - 1} more attempts.")
+                else:
+                    await ctx.author.send("You didn't respond in time. Please try the command again later.")
+                    return
+            except Exception as e:
+                await ctx.author.send(f"An error occurred: {e!s}")
+                logger.error(f"Error in check_subscription for user {ctx.author.id} ({ctx.author.name}): {e!s}",
+                             exc_info=True)
+                return
 
     @commands.command(name='renew_subscription')
     async def renew_subscription(self, ctx, days: int):
@@ -211,7 +224,7 @@ class CommandHandler(commands.Cog):
                 ticket_states[author.id] = TicketState.AWAITING_PAYMENT_CONFIRMATION
                 await channel.send(
                     f'Your PaymentIntent ID is: {payment_intent.id}\n'
-                    f'Please share your payment confirmation here by attaching an image and including the PaymentIntent '
+                    f'Please share your payment confirmation here by attaching an image and including the PaymentIntent'
                     f'ID in your message.'
                 )
             else:
@@ -370,7 +383,8 @@ class CommandHandler(commands.Cog):
                         if user:
                             if premium_role in message.author.roles:
                                 await message.channel.send(
-                                    f'{message.author.mention}, you already have the PREMIUM role. No need to send payment '
+                                    f'{message.author.mention}, you already have the PREMIUM role. No need to send '
+                                    f'payment'
                                     f'confirmation again.')
                                 logger.info(f"User {message.author} already has the PREMIUM role.")
                                 return
@@ -379,7 +393,8 @@ class CommandHandler(commands.Cog):
                                                                         Payment.confirmed).first()
                             if existing_payment:
                                 await message.channel.send(
-                                    f'{message.author.mention}, your payment has already been confirmed. No need to send '
+                                    f'{message.author.mention}, your payment has already been confirmed. No need to '
+                                    f'send'
                                     f'confirmation again.')
                                 logger.info(f"User {message.author}'s payment has already been confirmed.")
                                 return
