@@ -47,7 +47,7 @@ class DiscordBot(commands.Bot):
         logger.info("HTTP server started for health checks on port 80")
 
     async def setup_hook(self) -> None:
-        """Setup the bot by adding cogs and loading commands."""
+        """Set up the bot by adding cogs and loading commands."""
         command_handler = CommandHandler(self, self.db_manager)
         await self.add_cog(command_handler)
         await self.tree.sync()
@@ -68,17 +68,13 @@ class DiscordBot(commands.Bot):
         elif isinstance(error, commands.MissingRequiredArgument):
             await ctx.author.send(f"Missing required argument: {error.param}")
             self.logger.warning("Missing required argument: %s", error)
+        elif isinstance(error, commands.CommandInvokeError):
+            if isinstance(error.original, asyncio.TimeoutError):
+                await ctx.author.send("The command timed out. Please try again.")
+                self.logger.warning("Command timed out: %s", ctx.command.name)
+            else:
+                await ctx.author.send(f"An error occurred: {error.original}")
+                self.logger.error("Command invoke error: %s", error.original, exc_info=True)
         else:
             await ctx.author.send(f"An error occurred: {error!s}")
             self.logger.error("An error occurred: %s", error, exc_info=True)
-
-    @commands.Cog.listener()
-    async def on_command_error(self, ctx, error):
-        if isinstance(error, commands.CommandInvokeError):
-            if isinstance(error.original, asyncio.TimeoutError):
-                await ctx.send("The command timed out. Please try again.")
-            else:
-                await ctx.send(f"An error occurred: {error.original}")
-        else:
-            await ctx.send(f"An error occurred: {error}")
-
