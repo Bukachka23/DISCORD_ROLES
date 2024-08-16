@@ -31,7 +31,9 @@ class CommandHandler(commands.Cog):
         confirmation_message = await ctx.send("I've sent you a DM with instructions.")
 
         await confirmation_message.delete(delay=10)
-        await ctx.author.send("Please enter your email:")
+        await ctx.author.send("Hey Foxian! "
+                              "Well to confirm your details, please share the email ID with which you "
+                              "have purchased our premium plan.")
 
         def check(m):
             return m.author == ctx.author and isinstance(m.channel, discord.DMChannel)
