@@ -22,21 +22,6 @@ class DiscordBot(commands.Bot):
         self.db_manager = DatabaseManager(db_url)
         self.logger = logging.getLogger(__name__)
 
-    async def get_context(self, message, *, cls=commands.Context) -> commands.Context:
-        """Override the get_context method to handle custom prefixes."""
-        ctx = await super().get_context(message, cls=cls)
-        if ctx.prefix is not None and ctx.invoked_with:
-            ctx.command = self.all_commands.get(ctx.invoked_with.lower())
-            if ctx.command is None:
-                words = message.content[len(ctx.prefix):].split()
-                for i in range(1, len(words)):
-                    cmd_name = ' '.join(words[:i + 1]).lower()
-                    if cmd_name in self.all_commands:
-                        ctx.command = self.all_commands[cmd_name]
-                        ctx.invoked_with = cmd_name
-                        break
-        return ctx
-
     @staticmethod
     async def health_check(_) -> web.Response:
         """Health check endpoint for the HTTP server."""

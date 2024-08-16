@@ -25,7 +25,7 @@ class CommandHandler(commands.Cog):
         super().__init__()
         logger.info("CommandHandler initialized")
 
-    @commands.command(name='check subscription')
+    @commands.command(name='check_subscription')
     async def check_subscription(self, ctx):
         logger.info(f"Check subscription command invoked by user {ctx.author.id}")
         confirmation_message = await ctx.send("I've sent you a DM with instructions.")

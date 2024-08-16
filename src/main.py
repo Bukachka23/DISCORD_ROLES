@@ -20,7 +20,7 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 DB_URL = os.getenv('DATABASE_URL')
 PREMIUM_ROLE_ID = os.getenv('PREMIUM_ROLE_ID')
 stripe.api_key = os.getenv(EnvVariables.STRIPE_SECRET_KEY.value)
-COMMAND_PREFIX = ''
+COMMAND_PREFIX = '@'
 
 intents = discord.Intents.default()
 intents.message_content = True
