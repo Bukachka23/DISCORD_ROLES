@@ -7,10 +7,12 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
 
 from src.config.log_config import LOGGING
 from src.core.constants import EnvVariables
 from src.core.models import User, Base
+from psycopg2.errors import UniqueViolation
 
 load_dotenv()
 
@@ -55,6 +57,16 @@ class DatabaseManager:
             try:
                 session.commit()
                 logger.debug(f"User {user.user_id} added successfully")
+            except UniqueViolation as e:
+                logger.error(f"Duplicate user {user.user_id}: {e!s}")
+                session.rollback()
+                existing_user = session.query(User).filter_by(discord_id=user.discord_id).first()
+                if existing_user:
+                    logger.info(f"User {user.discord_id} already exists. Updating user information.")
+                    existing_user.username = user.username
+                    existing_user.subscription_start = user.subscription_start
+                    existing_user.subscription_end = user.subscription_end
+                    session.commit()
             except Exception as e:
                 logger.error(f"Error adding user {user.user_id}: {e!s}")
                 session.rollback()
@@ -70,6 +82,18 @@ class DatabaseManager:
                 return user_model
             logger.debug(f"User {user_id} not found")
             return None
+
+    def check_and_reset_sequence(self, table_name: str, primary_key: str) -> None:
+        """Check and reset the sequence for the primary key if it is out of sync."""
+        with self.Session() as session:
+            max_id = session.execute(text(f"SELECT MAX({primary_key}) FROM {table_name}")).scalar()
+            next_val = session.execute(text(f"SELECT nextval(pg_get_serial_sequence('{table_name}', "
+                                            f"'{primary_key}'))")).scalar()
+            if max_id and next_val and max_id >= next_val:
+                session.execute(text(f"SELECT setval(pg_get_serial_sequence('{table_name}', "
+                                     f"'{primary_key}'), {max_id + 1})"))
+                session.commit()
+                logger.info(f"Sequence for {table_name}.{primary_key} reset to {max_id + 1}")
 
 
 def init_db() -> None:
