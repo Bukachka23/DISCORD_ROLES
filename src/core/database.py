@@ -43,6 +43,26 @@ class DatabaseManager:
         Base.metadata.create_all(self.engine)
         logger.debug("Database tables created")
 
+    def create_tables(self) -> None:
+        """Create all tables in the database."""
+        logger.debug("Creating database tables")
+        try:
+            Base.metadata.create_all(self.engine)
+            logger.debug("Database tables created")
+        except Exception as e:
+            logger.error(f"Error creating database tables: {e!s}")
+            raise
+
+    def drop_all_tables(self) -> None:
+        """Drop all tables in the database."""
+        logger.debug("Dropping all database tables")
+        try:
+            Base.metadata.drop_all(self.engine)
+            logger.debug("All database tables dropped")
+        except Exception as e:
+            logger.error(f"Error dropping all database tables: {e!s}")
+            raise
+
     def add_user(self, user: User) -> None:
         """Add a new user to the database."""
         logger.info(f"Adding user: {user.user_id} - {user.username}")
