@@ -40,8 +40,19 @@ class DatabaseManager:
         logger.info(f"Initializing DatabaseManager with URL: {db_url}")
         self.engine = create_engine(db_url)
         self.Session = sessionmaker(bind=self.engine)
-        Base.metadata.create_all(self.engine)
-        logger.debug("Database tables created")
+        self.reset_database()
+        logger.debug("Database initialized successfully")
+
+    def reset_database(self) -> None:
+        """Reset the database by dropping all tables and recreating them."""
+        logger.debug("Resetting database by dropping all tables and recreating them")
+        try:
+            self.drop_all_tables()
+            self.create_tables()
+            logger.debug("Database reset successfully")
+        except Exception as e:
+            logger.error(f"Error resetting database: {e!s}")
+            raise
 
     def create_tables(self) -> None:
         """Create all tables in the database."""
@@ -57,11 +68,23 @@ class DatabaseManager:
         """Drop all tables in the database."""
         logger.debug("Dropping all database tables")
         try:
-            Base.metadata.drop_all(self.engine)
+            metadata = Base.metadata
+            metadata.reflect(bind=self.engine)
+            for table in sorted(metadata.tables.values(), key=lambda t: len(t.foreign_keys), reverse=True):
+                self._drop_table_and_dependencies(table.name)
             logger.debug("All database tables dropped")
         except Exception as e:
             logger.error(f"Error dropping all database tables: {e!s}")
             raise
+
+    def _drop_table_and_dependencies(self, table_name: str) -> None:
+        """Recursively drop a table and its dependencies."""
+        logger.debug(f"Dropping table and dependencies: {table_name}")
+        try:
+            Base.metadata.drop_all(self.engine, [Base.metadata.tables[table_name]], checkfirst=False)
+            logger.debug(f"Successfully dropped table and dependencies: {table_name}")
+        except Exception as e:
+            logger.error(f"Failed to drop table and dependencies: {table_name}: {e!s}")
 
     def add_user(self, user: User) -> None:
         """Add a new user to the database."""
