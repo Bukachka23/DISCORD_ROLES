@@ -313,7 +313,8 @@ class CommandHandler(commands.Cog):
                     amount = float(msg.content.strip())
                     if amount > 0:
                         break
-                    await channel.send("Amount must be greater than zero. Please enter a valid amount.")
+                    await channel.send("Amount must be greater than zero. "
+                                       "Please enter a valid amount(for example 59.95, 168.95, 666.95 .")
                 except ValueError:
                     await channel.send("Invalid amount. Please enter a number.")
                 except asyncio.TimeoutError:
