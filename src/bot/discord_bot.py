@@ -5,7 +5,10 @@ import discord
 from aiohttp import web
 from discord.ext import commands
 
-from src.bot.commands import CommandHandler
+from src.cogs.message_handler import MessageHandler
+from src.cogs.payment import PaymentCog
+from src.cogs.subscription import SubscriptionCog
+from src.cogs.ticket import TicketCog
 from src.config.logger import LOGGING
 from src.core.database import get_db
 
@@ -16,13 +19,15 @@ logger = logging.getLogger(__name__)
 class DiscordBot(commands.Bot):
     """Custom Discord bot with extended functionalities."""
 
-    def __init__(self, command_prefix: str):
+    def __init__(self, command_prefix: str, premium_role_id: int, admin_user_id: int):
         intents = discord.Intents.default()
         intents.message_content = True
         intents.members = True
         super().__init__(command_prefix=command_prefix, intents=intents)
 
         self.logger = logging.getLogger(__name__)
+        self.premium_role_id = premium_role_id
+        self.admin_user_id = admin_user_id
 
     @staticmethod
     async def health_check(_) -> web.Response:
@@ -55,13 +60,20 @@ class DiscordBot(commands.Bot):
     async def setup_hook(self) -> None:
         """
         Set up the bot by adding cogs and loading commands.
-
         This method is called before the bot starts.
         """
-        command_handler = CommandHandler(self)
-        await self.add_cog(command_handler)
+        payment_cog = PaymentCog(self, self.premium_role_id, self.admin_user_id)
+        subscription_cog = SubscriptionCog(self, self.premium_role_id, self.admin_user_id)
+        ticket_cog = TicketCog(self, self.premium_role_id, self.admin_user_id)
+        message_handler = MessageHandler(self)
+
+        await self.add_cog(payment_cog)
+        await self.add_cog(subscription_cog)
+        await self.add_cog(ticket_cog)
+        await self.add_cog(message_handler)
+
         await self.tree.sync()
-        self.logger.info("CommandHandler cog loaded")
+        self.logger.info("All cogs loaded successfully")
 
     async def on_ready(self) -> None:
         """Log bot information when it is ready."""

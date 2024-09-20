@@ -1,19 +1,28 @@
+import logging.config
+import os
 from enum import Enum
 from typing import Any, Dict
 
+from dotenv import load_dotenv
+
+from src.config.logger import LOGGING
+
+load_dotenv()
+
+logging.config.dictConfig(LOGGING)
+logger = logging.getLogger(__name__)
 
 ticket_states: Dict[int, Any] = {}
 ticket_info: Dict[int, Dict[str, Any]] = {}
 
 
-class EnvVariables(Enum):
-    """Enumeration of environment variable keys."""
-    DISCORD_BOT_TOKEN = 'DISCORD_BOT_TOKEN'
-    PREMIUM_ROLE_ID = 'PREMIUM_ROLE_ID'
-    OPENAI_API_KEY = 'OPENAI_API_KEY'
-    DATABASE_URL = 'DATABASE_URL'
-    STRIPE_SECRET_KEY = 'STRIPE_SECRET_KEY'
-    ADMIN_USER_ID = 'ADMIN_USER_ID'
+class EnvSettings:
+    DISCORD_BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
+    PREMIUM_ROLE_ID = os.getenv('PREMIUM_ROLE_ID')
+    STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY')
+    ADMIN_USER_ID = int(os.getenv('ADMIN_USER_ID'))
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    COMMAND_PREFIX = '/'
 
 
 class TicketState(Enum):

@@ -1,5 +1,4 @@
 import logging.config
-import os
 import time
 from typing import Generator, Optional
 
@@ -9,7 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from sqlalchemy.orm import sessionmaker, Session
 
 from src.config.logger import LOGGING
-from src.core.constants import EnvVariables
+from src.config.settings import EnvSettings
 from src.core.models import User, Base
 
 
@@ -20,7 +19,7 @@ logging.config.dictConfig(LOGGING)
 logger = logging.getLogger(__name__)
 
 
-DATABASE_URL = os.getenv(EnvVariables.DATABASE_URL.value)
+DATABASE_URL = EnvSettings.DATABASE_URL
 
 if not DATABASE_URL:
     logger.critical("DATABASE_URL environment variable not set.")

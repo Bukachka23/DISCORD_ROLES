@@ -1,17 +1,16 @@
 import logging.config
-import os
 from datetime import datetime
 from typing import Optional
 
 import stripe
 
 from src.config.logger import LOGGING
-from src.core.constants import EnvVariables
+from src.config.settings import EnvSettings
 
 logging.config.dictConfig(LOGGING)
 logger = logging.getLogger(__name__)
 
-stripe.api_key = os.getenv(EnvVariables.STRIPE_SECRET_KEY.value)
+stripe.api_key = EnvSettings.STRIPE_SECRET_KEY
 
 
 def create_payment_intent(amount: int, currency: str, order_id: str) -> stripe.PaymentIntent:
