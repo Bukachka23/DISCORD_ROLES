@@ -1,8 +1,10 @@
 import asyncio
 import logging.config
+import os
 from datetime import datetime
 
 import discord
+from discord import File
 from discord.ext import commands
 
 from src.config.logger import LOGGING
@@ -50,7 +52,7 @@ class TicketCog(commands.Cog):
                 await ctx.send(f"{member.mention}, you do not have any open tickets.")
                 return
 
-            ticket_channel = guild.get_channel(int(existing_ticket.channel_id))
+            ticket_channel = guild.get_channel(int(existing_ticket.channel_id))  # type: ignore
             if ticket_channel:
                 await ticket_channel.delete()
                 logger.info(f"Deleted ticket channel {ticket_channel.name} for user {member}")
@@ -65,6 +67,41 @@ class TicketCog(commands.Cog):
         except Exception as e:
             logger.error(f"Error deleting ticket for user {ctx.author.id}: {e!s}", exc_info=True)
             await ctx.send("⚠️ **An error occurred** while deleting the ticket. Please try again later.")
+        finally:
+            db.close()
+
+    @commands.command(name='restart_payment')
+    async def restart_payment(self, ctx: commands.Context) -> None:
+        """
+        Restart the payment verification process in the current ticket channel.
+        """
+        logger.info(f"Restart payment command invoked by user {ctx.author.id} in channel {ctx.channel.id}")
+        channel = ctx.channel
+        user_id = str(ctx.author.id)
+
+        db = next(get_db())
+        try:
+            user = db.query(User).filter(User.discord_id == user_id).first()
+            if not user:
+                await ctx.send("⚠️ You do not have an open ticket.")
+                return
+
+            existing_ticket = db.query(Ticket).filter(
+                Ticket.user_id == user.id,
+                Ticket.closed_at.is_(None),
+                Ticket.channel_id == str(channel.id)
+            ).first()
+
+            if not existing_ticket:
+                await ctx.send("⚠️ This is not your ticket channel.")
+                return
+
+            await ctx.send("🔄 Restarting the payment verification process...")
+            await self.start_ticket_conversation(channel, user_id)
+
+        except Exception as e:
+            logger.error(f"Error restarting payment for user {user_id}: {e!s}", exc_info=True)
+            await ctx.send("⚠️ An error occurred while restarting the payment process. Please try again later.")
         finally:
             db.close()
 
@@ -103,7 +140,7 @@ class TicketCog(commands.Cog):
             ).first()
 
             if existing_ticket:
-                ticket_channel = guild.get_channel(int(existing_ticket.channel_id))
+                ticket_channel = guild.get_channel(int(existing_ticket.channel_id))  # type: ignore
                 if ticket_channel:
                     await ctx.send(
                         f"{ctx.author.mention}, you already have an open ticket: {ticket_channel.mention}\n"
@@ -198,14 +235,27 @@ class TicketCog(commands.Cog):
                         "*Example:* `EUR`"
                     )
                 except asyncio.TimeoutError:
-                    await channel.send("⏰ **Session Timed Out**\n\nYou took too long to respond. Please start the "
-                                       "process again if you wish to continue.")
-                    return
+                    await channel.send(
+                        "⏰ **Session Timed Out**\n\nYou took too long to respond.\nDo you want to restart the "
+                        "process? (yes/no)")
+                    try:
+                        confirmation = await self.bot.wait_for('message', check=message_check, timeout=60)
+                        if confirmation.content.lower() in ('yes', 'y'):
+                            await channel.send("🔄 Restarting the payment verification process...")
+                            await self.start_ticket_conversation(channel, user_id)
+                        else:
+                            await channel.send(
+                                "Okay, the process has been cancelled. If you change your mind, you can restart it at "
+                                "any time.")
+                        return
+                    except asyncio.TimeoutError:
+                        await channel.send("No response received. The process has been cancelled.")
+                        return
 
             await channel.send(
                 f"**Step 2: Enter the Payment Amount**\n\n"
                 f"You have selected **{currency}** as your payment currency.\n"
-                "Please enter the **amount** you wish to pay.\n\n"
+                "Please enter the **amount** you have paid.\n\n"
                 "*Example:* `59.95`"
             )
 
@@ -231,11 +281,28 @@ class TicketCog(commands.Cog):
                                        "process again if you wish to continue.")
                     return
 
-            await channel.send(
-                "**Step 3: Provide Your Order ID**\n\n"
-                "Please enter your **Order ID** associated with this payment.\n\n"
-                "*Example:* `ORD123456789`"
-            )
+            image_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', 'pic.jpg'))
+
+            if not os.path.isfile(image_path):
+                logger.error(f"Image file not found at path: {image_path}")
+                await channel.send(
+                    "⚠️ **Image Not Found**\n\n"
+                    "The example Order ID image could not be found. Please contact support."
+                )
+                return
+
+            file = File(image_path, filename='pic.jpg')
+
+            embed = discord.Embed(
+                title="Step 3: Provide Your Order ID",
+                description=(
+                    "Please enter your **Order ID** associated with this payment.\n\n"
+                    "*Example:* `ORD123456789`"
+                ),
+                color=discord.Color.blue()
+            ).set_image(url="attachment://pic.jpg")
+
+            await channel.send(embed=embed, file=file)
 
             try:
                 msg = await self.bot.wait_for('message', check=message_check, timeout=120)
@@ -248,8 +315,10 @@ class TicketCog(commands.Cog):
                     )
                     return
             except asyncio.TimeoutError:
-                await channel.send("⏰ **Session Timed Out**\n\nYou took too long to respond. Please start the process "
-                                   "again if you wish to continue.")
+                await channel.send(
+                    "⏰ **Session Timed Out**\n\nYou took too long to respond. Please start the process again if you "
+                    "wish to continue."
+                )
                 return
 
             payment_intent = create_payment_intent(int(amount * 100), currency.lower(), order_id)
