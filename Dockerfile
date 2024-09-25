@@ -13,6 +13,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+COPY src/data/pic.jpg src/data/pic.jpg
+
 ENV PYTHONPATH "${PYTHONPATH}:/app"
 
 CMD ["python", "src/main.py"]
