@@ -1,12 +1,14 @@
 import asyncio
 import logging.config
-import os
 from datetime import datetime
 
 import discord
-from discord import File
 from discord.ext import commands
 
+from src.buttons.kb_amount import AmountView
+from src.buttons.kb_confirm_payment import ConfirmPaymentView
+from src.buttons.kb_currency import CurrencyView
+from src.buttons.kd_order_id import OrderIDView
 from src.config.logger import LOGGING
 from src.core.database import get_db
 from src.core.models import Ticket, User
@@ -29,8 +31,6 @@ class TicketCog(commands.Cog):
     async def delete_ticket(self, ctx: commands.Context) -> None:
         """
         Delete the user's open ticket.
-
-        Removes the ticket channel from Discord and updates the database accordingly.
         """
         logger.info(f"Delete ticket command invoked by user {ctx.author.id}")
         guild = ctx.guild
@@ -52,7 +52,7 @@ class TicketCog(commands.Cog):
                 await ctx.send(f"{member.mention}, you do not have any open tickets.")
                 return
 
-            ticket_channel = guild.get_channel(int(existing_ticket.channel_id))  # type: ignore
+            ticket_channel = guild.get_channel(int(existing_ticket.channel_id))  # type: ignore # noqa: E501
             if ticket_channel:
                 await ticket_channel.delete()
                 logger.info(f"Deleted ticket channel {ticket_channel.name} for user {member}")
@@ -108,9 +108,7 @@ class TicketCog(commands.Cog):
     @commands.command(name='start_payment')
     async def start_payment(self, ctx: commands.Context) -> None:
         """
-        Start the payment verification process.
-
-        Creates a support ticket for the user to begin payment verification.
+        Start the payment verification process with interactive buttons.
         """
         logger.info(f"Start payment command invoked by user {ctx.author.id}")
         await self.create_ticket(ctx, str(ctx.author.id))
@@ -118,10 +116,6 @@ class TicketCog(commands.Cog):
     async def create_ticket(self, ctx: commands.Context, user_id: str) -> None:
         """
         Create a ticket for the user and initiate the payment verification conversation.
-
-        Args:
-            ctx (commands.Context): The context of the command.
-            user_id (str): The Discord user ID.
         """
         guild = ctx.guild
         db = next(get_db())
@@ -140,7 +134,7 @@ class TicketCog(commands.Cog):
             ).first()
 
             if existing_ticket:
-                ticket_channel = guild.get_channel(int(existing_ticket.channel_id))  # type: ignore
+                ticket_channel = guild.get_channel(int(existing_ticket.channel_id))  # type: ignore # noqa: E501
                 if ticket_channel:
                     await ctx.send(
                         f"{ctx.author.mention}, you already have an open ticket: {ticket_channel.mention}\n"
@@ -155,9 +149,7 @@ class TicketCog(commands.Cog):
 
             overwrites = {
                 guild.default_role: discord.PermissionOverwrite(read_messages=False),
-                guild.get_member(int(user_id)): discord.PermissionOverwrite(
-                    read_messages=True, send_messages=True
-                ),
+                guild.get_member(int(user_id)): discord.PermissionOverwrite(read_messages=True, send_messages=True),
                 guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True),
             }
 
@@ -185,12 +177,7 @@ class TicketCog(commands.Cog):
 
             await ticket_channel.send(
                 f"{ctx.author.mention}, your ticket has been created. Let's start the **payment verification** "
-                f"process.\n\n"
-                "📌 **Next Steps:**\n"
-                "1. Select your payment currency (USD, EUR, GBP).\n"
-                "2. Enter the payment amount.\n"
-                "3. Provide your Order ID.\n"
-                "4. Share your payment confirmation image along with the PaymentIntent ID."
+                f"process."
             )
             await ctx.send(f"{ctx.author.mention}, your ticket has been created: {ticket_channel.mention}\nPlease "
                            f"follow the instructions in the ticket to complete your payment verification.")
@@ -206,141 +193,125 @@ class TicketCog(commands.Cog):
     async def start_ticket_conversation(self, channel: discord.TextChannel, user_id: str) -> None:
         """
         Start the conversation with the user in the ticket channel to verify payment details.
-
-        Args:
-            channel (discord.TextChannel): The ticket channel.
-            user_id (str): The Discord user ID.
         """
-
-        def message_check(message: discord.Message) -> bool:
-            return message.author.id == int(user_id) and message.channel == channel
-
         try:
+            currency_view = CurrencyView()
             await channel.send(
                 "**Step 1: Select Your Payment Currency**\n\n"
-                "Please choose your payment currency from the following options:\n"
-                "`USD`, `EUR`, `GBP`\n\n"
-                "*Example:* `USD`"
+                "Please choose your payment currency from the following options:",
+                view=currency_view
             )
+            await currency_view.wait()
+            if currency_view.value is None:
+                await channel.send("You didn't select a currency in time. Please start over.")
+                return
 
-            while True:
-                try:
-                    msg = await self.bot.wait_for('message', check=message_check, timeout=120)
-                    currency = msg.content.strip().upper()
-                    if currency in {'USD', 'EUR', 'GBP'}:
-                        break
-                    await channel.send(
-                        "❌ **Invalid Currency**\n\n"
-                        "Please enter one of the following currencies: `USD`, `EUR`, `GBP`.\n\n"
-                        "*Example:* `EUR`"
-                    )
-                except asyncio.TimeoutError:
-                    await channel.send(
-                        "⏰ **Session Timed Out**\n\nYou took too long to respond.\nDo you want to restart the "
-                        "process? (yes/no)")
-                    try:
-                        confirmation = await self.bot.wait_for('message', check=message_check, timeout=60)
-                        if confirmation.content.lower() in ('yes', 'y'):
-                            await channel.send("🔄 Restarting the payment verification process...")
-                            await self.start_ticket_conversation(channel, user_id)
-                        else:
-                            await channel.send(
-                                "Okay, the process has been cancelled. If you change your mind, you can restart it at "
-                                "any time.")
-                        return
-                    except asyncio.TimeoutError:
-                        await channel.send("No response received. The process has been cancelled.")
-                        return
+            currency = currency_view.value
 
+            amount_view = AmountView()
             await channel.send(
                 f"**Step 2: Enter the Payment Amount**\n\n"
                 f"You have selected **{currency}** as your payment currency.\n"
-                "Please enter the **amount** you have paid.\n\n"
-                "*Example:* `59.95`"
+                "Please click the button below to enter the amount you have paid.",
+                view=amount_view
             )
-
-            while True:
-                try:
-                    msg = await self.bot.wait_for('message', check=message_check, timeout=120)
-                    amount = float(msg.content.strip())
-                    if amount > 0:
-                        break
-                    await channel.send(
-                        "❌ **Invalid Amount**\n\n"
-                        "The amount must be greater than zero.\n"
-                        "Please enter a valid amount (e.g., `59.95`, `168.95`, `666.95`)."
-                    )
-                except ValueError:
-                    await channel.send(
-                        "❌ **Invalid Input**\n\n"
-                        "Please enter a numerical value for the amount.\n\n"
-                        "*Example:* `99.99`"
-                    )
-                except asyncio.TimeoutError:
-                    await channel.send("⏰ **Session Timed Out**\n\nYou took too long to respond. Please start the "
-                                       "process again if you wish to continue.")
-                    return
-
-            image_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', 'pic.jpg'))
-
-            if not os.path.isfile(image_path):
-                logger.error(f"Image file not found at path: {image_path}")
-                await channel.send(
-                    "⚠️ **Image Not Found**\n\n"
-                    "The example Order ID image could not be found. Please contact support."
-                )
+            await amount_view.wait()
+            if amount_view.value is None:
+                await channel.send("You didn't enter an amount in time. Please start over.")
                 return
 
-            file = File(image_path, filename='pic.jpg')
+            amount = amount_view.value
 
-            embed = discord.Embed(
-                title="Step 3: Provide Your Order ID",
-                description=(
-                    "Please enter your **Order ID** associated with this payment.\n\n"
-                    "*Example:* `ORD123456789`"
-                ),
-                color=discord.Color.blue()
-            ).set_image(url="attachment://pic.jpg")
-
-            await channel.send(embed=embed, file=file)
-
-            try:
-                msg = await self.bot.wait_for('message', check=message_check, timeout=120)
-                order_id = msg.content.strip()
-                if not order_id:
-                    await channel.send(
-                        "❌ **Invalid Order ID**\n\n"
-                        "Order ID cannot be empty. Please enter a valid Order ID.\n\n"
-                        "*Example:* `ORD123456789`"
-                    )
-                    return
-            except asyncio.TimeoutError:
-                await channel.send(
-                    "⏰ **Session Timed Out**\n\nYou took too long to respond. Please start the process again if you "
-                    "wish to continue."
-                )
+            order_id_view = OrderIDView()
+            await channel.send(
+                "**Step 3: Provide Your Order ID**\n\n"
+                "Please click the button below to enter your **Order ID** associated with this payment.",
+                view=order_id_view
+            )
+            await order_id_view.wait()
+            if order_id_view.value is None:
+                await channel.send("You didn't provide an Order ID in time. Please start over.")
                 return
+
+            order_id = order_id_view.value
 
             payment_intent = create_payment_intent(int(amount * 100), currency.lower(), order_id)
             await channel.send(
                 f"**Step 4: Confirm Your Payment**\n\n"
                 f"Your **PaymentIntent ID** is: `{payment_intent.id}`\n\n"
-                "Please complete your payment using this PaymentIntent ID.\n"
-                "Once the payment is complete, **share a screenshot** of your payment confirmation **image** along "
-                "with the PaymentIntent ID in this channel.\n\n"
-                "🔗 *Example:* `pi_1Hh1XYZAbCdEfGhIjKlMnOpQ`"
-            )
-            await channel.send(
-                "💡 **Tips for Payment Confirmation:**\n"
-                "- Ensure the PaymentIntent ID in your screenshot matches the one provided above.\n"
-                "- Supported image formats: PNG, JPG, JPEG, WEBP, GIF.\n"
-                "- If you encounter any issues, please contact support for assistance."
+                "Please complete your payment using this PaymentIntent ID.",
             )
 
-        except Exception as e:
+            confirm_payment_view = ConfirmPaymentView()
             await channel.send(
-                f"⚠️ **An error occurred** during the payment verification process. Please try again later or contact "
-                f"support.\n\n"
-                f"**Error Details:** {e!s}"
+                "Once the payment is complete, please click the button below to confirm.",
+                view=confirm_payment_view
             )
-            logger.error(f"Error in start_ticket_conversation for channel {channel.id}: {e!s}", exc_info=True)
+            await confirm_payment_view.wait()
+            if not confirm_payment_view.confirmed:
+                await channel.send("You didn't confirm your payment in time. Please start over.")
+                return
+
+            await channel.send(
+                "Please upload your payment confirmation image along with the PaymentIntent ID in this channel.\n\n"
+                "🔗 *Example:* `pi_1Hh1XYZAbCdEfGhIjKlMnOpQ`"
+            )
+
+            def payment_check(m):
+                return m.author.id == int(user_id) and m.channel == channel and len(m.attachments) > 0
+
+            try:
+                payment_msg = await self.bot.wait_for('message', check=payment_check, timeout=300.0)
+                payment_image = payment_msg.attachments[0]
+                payment_intent_id = None
+                for word in payment_msg.content.split():
+                    if word.startswith('pi_'):
+                        payment_intent_id = word
+                        break
+
+                if not payment_intent_id:
+                    await channel.send("No valid PaymentIntent ID found in your message. Please try again.")
+                    return
+
+                await channel.send(
+                    "Thank you for submitting your payment confirmation. Our team will verify the payment shortly."
+                )
+
+                await self.notify_admins(
+                    channel, user_id, amount, currency, order_id, payment_intent_id, payment_image.url
+                )
+
+            except asyncio.TimeoutError:
+                await channel.send(
+                    "You didn't provide payment confirmation in time. Please start over if you still wish to complete "
+                    "the payment.")
+                return
+
+        except Exception as e:
+            logger.error(f"Error in payment process for user {user_id}: {e}", exc_info=True)
+            await channel.send("An error occurred during the payment process. Please contact support for assistance.")
+
+    async def notify_admins(self, channel: discord.TextChannel, user_id: str, amount: float, currency: str,
+                            order_id: str, payment_intent_id: str, image_url: str) -> None:
+        """
+        Notify admins about the new payment confirmation.
+        """
+        admin_channel_id = self.admin_user_id
+        admin_channel = self.bot.get_channel(admin_channel_id)
+
+        if admin_channel:
+            embed = discord.Embed(
+                title="🆕 New Payment Confirmation",
+                description=f"**User:** <@{user_id}>\n**Channel:** {channel.mention}",
+                color=discord.Color.green(),
+                timestamp=datetime.utcnow()
+            )
+            embed.add_field(name="Amount", value=f"{amount} {currency}", inline=True)
+            embed.add_field(name="Order ID", value=order_id, inline=True)
+            embed.add_field(name="PaymentIntent ID", value=payment_intent_id, inline=False)
+            embed.set_image(url=image_url)
+
+            await admin_channel.send(embed=embed)
+            logger.info(f"Notified admins about payment confirmation for user {user_id}")
+        else:
+            logger.error(f"Admin notification channel not found. Searched for channel ID: {admin_channel_id}")
