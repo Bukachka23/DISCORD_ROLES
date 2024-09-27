@@ -4,7 +4,7 @@ from discord import ButtonStyle, Interaction
 
 class OrderIDView(discord.ui.View):
     def __init__(self):
-        super().__init__()
+        super().__init__(timeout=300)
         self.value = None
 
     @discord.ui.button(label="Enter Order ID", style=ButtonStyle.primary)

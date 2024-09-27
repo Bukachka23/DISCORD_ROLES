@@ -4,7 +4,7 @@ from discord import ButtonStyle, Interaction
 
 class ConfirmPaymentView(discord.ui.View):
     def __init__(self):
-        super().__init__()
+        super().__init__(timeout=300)
         self.confirmed = False
 
     @discord.ui.button(label="I have completed the payment", style=ButtonStyle.primary)

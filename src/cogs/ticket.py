@@ -1,11 +1,14 @@
 import asyncio
+import io
 import logging.config
+import os
 from datetime import datetime
+from typing import cast
 
 import discord
 from discord.ext import commands
 
-from src.buttons.kb_amount import AmountView
+from src.buttons.kb_amount_selection import AmountSelectionView
 from src.buttons.kb_confirm_payment import ConfirmPaymentView
 from src.buttons.kb_currency import CurrencyView
 from src.buttons.kd_order_id import OrderIDView
@@ -176,8 +179,9 @@ class TicketCog(commands.Cog):
             db.commit()
 
             await ticket_channel.send(
-                f"{ctx.author.mention}, your ticket has been created. Let's start the **payment verification** "
-                f"process."
+                f"{ctx.author.mention}, your ticket has been created. "
+                f"Let's start the **payment verification** process.\n\n"
+                "Please keep the invoice received on email with you."
             )
             await ctx.send(f"{ctx.author.mention}, your ticket has been created: {ticket_channel.mention}\nPlease "
                            f"follow the instructions in the ticket to complete your payment verification.")
@@ -208,26 +212,42 @@ class TicketCog(commands.Cog):
 
             currency = currency_view.value
 
-            amount_view = AmountView()
+            amounts = [59.95, 168.95, 666.95]
+            amount_view = AmountSelectionView(amounts)
             await channel.send(
-                f"**Step 2: Enter the Payment Amount**\n\n"
+                f"**Step 2: Select the Payment Amount**\n\n"
                 f"You have selected **{currency}** as your payment currency.\n"
-                "Please click the button below to enter the amount you have paid.",
+                "Please select the amount you have paid from the options below:",
                 view=amount_view
             )
             await amount_view.wait()
             if amount_view.value is None:
-                await channel.send("You didn't enter an amount in time. Please start over.")
+                await channel.send("You didn't select an amount in time. Please start over.")
                 return
 
             amount = amount_view.value
 
             order_id_view = OrderIDView()
-            await channel.send(
-                "**Step 3: Provide Your Order ID**\n\n"
-                "Please click the button below to enter your **Order ID** associated with this payment.",
-                view=order_id_view
+            embed = discord.Embed(
+                title="**Step 3: Provide Your Order ID**",
+                description="Please click the button below to enter your **Order ID** associated with this payment.",
+                color=discord.Color.blue()
             )
+
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            image_path = os.path.join(current_dir, "..", "data", "pic.jpg")
+
+            if not os.path.isfile(image_path):
+                logger.error(f"Image file not found at path: {image_path}")
+                await channel.send("An internal error occurred. Please contact support.")
+                return
+
+            with open(image_path, 'rb') as image_file:
+                buffered_image_file = cast(io.BufferedIOBase, image_file)
+                image = discord.File(buffered_image_file, filename="pic.jpg")
+                embed.set_image(url="attachment://pic.jpg")
+                await channel.send(file=image, embed=embed, view=order_id_view)
+
             await order_id_view.wait()
             if order_id_view.value is None:
                 await channel.send("You didn't provide an Order ID in time. Please start over.")
@@ -283,8 +303,9 @@ class TicketCog(commands.Cog):
 
             except asyncio.TimeoutError:
                 await channel.send(
-                    "You didn't provide payment confirmation in time. Please start over if you still wish to complete "
-                    "the payment.")
+                    "You didn't provide payment confirmation in time. "
+                    "Please start over if you still wish to complete the payment."
+                )
                 return
 
         except Exception as e:
