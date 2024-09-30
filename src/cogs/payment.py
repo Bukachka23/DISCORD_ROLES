@@ -9,6 +9,7 @@ from src.config.logger import LOGGING
 from src.config.settings import EnvSettings, get_welcome_message
 from src.core.database import get_db
 from src.core.models import Payment, User
+from src.core.utils import verify_payment_intent
 
 logging.config.dictConfig(LOGGING)
 logger = logging.getLogger(__name__)
@@ -100,7 +101,7 @@ class PaymentCog(commands.Cog):
             image_url (str): URL of the payment confirmation image.
         """
         try:
-            payment_verified = True
+            payment_verified = verify_payment_intent(payment_intent_id)
 
             if not payment_verified:
                 await ctx.send(

@@ -107,3 +107,26 @@ def calculate_remaining_days(subscription: stripe.Subscription) -> int:
     remaining_days = (current_period_end - datetime.utcnow()).days
     logger.debug(f"Remaining days for subscription {subscription.id}: {remaining_days}")
     return remaining_days
+
+
+def verify_payment_intent(payment_intent_id: str) -> bool:
+    """
+    Verify the payment intent with Stripe.
+
+    Args:
+        payment_intent_id (str): The PaymentIntent ID to verify.
+
+    Returns:
+        bool: True if the payment intent is valid and succeeded, False otherwise.
+    """
+    try:
+        payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
+        if payment_intent.status == 'succeeded':
+            logger.info(f"PaymentIntent {payment_intent_id} verified successfully.")
+            return True
+        else:
+            logger.warning(f"PaymentIntent {payment_intent_id} has status {payment_intent.status}.")
+            return False
+    except stripe.error.StripeError as e:
+        logger.error(f"Error retrieving PaymentIntent {payment_intent_id}: {e}")
+        return False
