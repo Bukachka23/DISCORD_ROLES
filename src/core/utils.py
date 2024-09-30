@@ -117,16 +117,18 @@ def verify_payment_intent(payment_intent_id: str) -> bool:
         payment_intent_id (str): The PaymentIntent ID to verify.
 
     Returns:
-        bool: True if the payment intent is valid and succeeded, False otherwise.
+        bool: True if the payment intent is valid and in an acceptable status, False otherwise.
     """
     try:
         payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
-        if payment_intent.status == 'succeeded':
-            logger.info(f"PaymentIntent {payment_intent_id} verified successfully.")
+        acceptable_statuses = ['succeeded', 'processing', 'requires_capture']
+        if payment_intent.status in acceptable_statuses:
+            logger.info(f"PaymentIntent {payment_intent_id} verified successfully with status '{payment_intent.status}'.")
             return True
         else:
-            logger.warning(f"PaymentIntent {payment_intent_id} has status {payment_intent.status}.")
+            logger.warning(f"PaymentIntent {payment_intent_id} has unacceptable status '{payment_intent.status}'.")
             return False
     except stripe.error.StripeError as e:
         logger.error(f"Error retrieving PaymentIntent {payment_intent_id}: {e}")
         return False
+
