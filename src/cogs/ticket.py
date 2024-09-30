@@ -264,7 +264,7 @@ class TicketCog(commands.Cog):
 
             confirm_payment_view = ConfirmPaymentView()
             await channel.send(
-                "Once the payment is complete, please click the button below to confirm.",
+                "**Once the payment is complete, please click the button below to confirm.**",
                 view=confirm_payment_view
             )
             await confirm_payment_view.wait()
