@@ -1,5 +1,6 @@
 import logging.config
 import os
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict
 
@@ -21,7 +22,7 @@ class EnvSettings:
     PREMIUM_ROLE_ID = os.getenv('PREMIUM_ROLE_ID')
     STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY')
     ADMIN_USER_ID = int(os.getenv('ADMIN_USER_ID'))
-    DATABASE_URL = os.getenv('DATABASE_URL')
+    DATABASE_URL = os.getenv('DATABASE_URL').replace('postgresql://', 'postgresql+asyncpg://')
     COMMAND_PREFIX = '/'
 
 
@@ -31,6 +32,18 @@ class TicketState(Enum):
     AWAITING_CURRENCY = 2
     AWAITING_ORDER_ID = 3
     AWAITING_PAYMENT_CONFIRMATION = 4
+
+
+@dataclass(frozen=True)
+class ConfigConstants:
+    MAX_RETRIES: int = 3
+    RESPONSE_TIMEOUT: float = 120.0
+    CONFIRM_DELETE_DELAY: int = 10
+    VALID_ATTACHMENT_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
+    PAYMENT_INTENT_PREFIX = 'pi_'
+    MAX_PAYMENT_RETRIES = 3
+    PAYMENT_TIMEOUT = 120.0
+    ADMIN_CHANNEL_ID = EnvSettings.ADMIN_USER_ID
 
 
 WELCOME_MESSAGE_TEMPLATE = """

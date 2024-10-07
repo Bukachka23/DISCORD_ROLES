@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 async def main() -> None:
     """Initialize and start the Discord bot."""
     try:
-        init_db()
+        await init_db()
     except Exception as e:
         logger.critical(f"Failed to initialize the database: {e}")
         return

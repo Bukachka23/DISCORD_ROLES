@@ -131,4 +131,3 @@ def verify_payment_intent(payment_intent_id: str) -> bool:
     except stripe.error.StripeError as e:
         logger.error(f"Error retrieving PaymentIntent {payment_intent_id}: {e}")
         return False
-

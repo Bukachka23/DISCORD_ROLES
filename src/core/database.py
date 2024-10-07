@@ -1,46 +1,30 @@
+import asyncio
 import logging.config
-import time
-from typing import Generator, Optional
-
+from typing import Optional, AsyncGenerator
+from contextlib import asynccontextmanager
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import text, select
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker
 
 from src.config.logger import LOGGING
 from src.config.settings import EnvSettings
 from src.core.models import User, Base
 
-
 load_dotenv()
-
 
 logging.config.dictConfig(LOGGING)
 logger = logging.getLogger(__name__)
 
-
-DATABASE_URL = EnvSettings.DATABASE_URL
+DATABASE_URL = EnvSettings.DATABASE_URL.replace('postgresql://', 'postgresql+asyncpg://')
 
 if not DATABASE_URL:
     logger.critical("DATABASE_URL environment variable not set.")
     raise EnvironmentError("DATABASE_URL environment variable not set.")
 
-try:
-    engine = create_engine(
-        DATABASE_URL,
-        echo=False,
-        pool_pre_ping=True
-    )
-    logger.info("Database engine created successfully.")
-except SQLAlchemyError as e:
-    logger.critical(f"Failed to create database engine: {e}")
-    raise
-
-SessionLocal = sessionmaker(
-    bind=engine,
-    autocommit=False,
-    autoflush=False
-)
+engine = create_async_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
+AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 class DatabaseManager:
@@ -59,18 +43,19 @@ class DatabaseManager:
         self._create_tables()
 
     @staticmethod
-    def _create_tables() -> None:
+    async def _create_tables() -> None:
         """
         Creates all tables defined in the Base metadata.
         """
         try:
-            Base.metadata.create_all(bind=engine)
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
             logger.debug("Database tables created successfully.")
         except SQLAlchemyError as e:
             logger.critical(f"Error creating database tables: {e}")
             raise
 
-    def add_or_update_user(self, user: User) -> None:
+    async def add_or_update_user(self, user: User) -> None:
         """
         Adds a new user to the database or updates an existing user's information.
 
@@ -78,9 +63,10 @@ class DatabaseManager:
             user (User): The User instance to add or update.
         """
         logger.info(f"Adding/updating user: {user.discord_id} - {user.username}")
-        with self.session_factory() as session:
+        async with self.session_factory() as session:
             try:
-                existing_user = session.query(User).filter(User.discord_id == user.discord_id).first()
+                existing_user = await session.execute(select(User).filter(User.discord_id == user.discord_id))
+                existing_user = existing_user.scalar_one_or_none()
                 if existing_user:
                     logger.debug(f"User {user.discord_id} exists. Updating information.")
                     existing_user.username = user.username
@@ -89,18 +75,18 @@ class DatabaseManager:
                 else:
                     logger.debug(f"User {user.discord_id} does not exist. Adding new user.")
                     session.add(user)
-                session.commit()
+                await session.commit()
                 logger.debug(f"User {user.discord_id} added/updated successfully.")
             except IntegrityError as e:
                 logger.error(f"IntegrityError when adding/updating user {user.discord_id}: {e}")
-                session.rollback()
+                await session.rollback()
                 raise
             except SQLAlchemyError as e:
                 logger.error(f"SQLAlchemyError when adding/updating user {user.discord_id}: {e}")
-                session.rollback()
+                await session.rollback()
                 raise
 
-    def get_user_by_discord_id(self, discord_id: str) -> Optional[User]:
+    async def get_user_by_discord_id(self, discord_id: str) -> Optional[User]:
         """
         Retrieves a user from the database by their Discord ID.
 
@@ -111,9 +97,10 @@ class DatabaseManager:
             Optional[User]: The User instance if found, else None.
         """
         logger.info(f"Retrieving user with Discord ID: {discord_id}")
-        with self.session_factory() as session:
+        async with self.session_factory() as session:
             try:
-                user = session.query(User).filter(User.discord_id == discord_id).first()
+                result = await session.execute(select(User).filter(User.discord_id == discord_id))
+                user = result.scalar_one_or_none()
                 if user:
                     logger.debug(f"User {discord_id} found.")
                 else:
@@ -123,7 +110,7 @@ class DatabaseManager:
                 logger.error(f"Error retrieving user {discord_id}: {e}")
                 return None
 
-    def get_user_by_user_id(self, user_id: int) -> Optional[User]:
+    async def get_user_by_user_id(self, user_id: int) -> Optional[User]:
         """
         Retrieves a user from the database by their internal user ID.
 
@@ -134,9 +121,10 @@ class DatabaseManager:
             Optional[User]: The User instance if found, else None.
         """
         logger.info(f"Retrieving user with User ID: {user_id}")
-        with self.session_factory() as session:
+        async with self.session_factory() as session:
             try:
-                user = session.query(User).filter(User.id == user_id).first()
+                result = await session.execute(select(User).filter(User.id == user_id))
+                user = result.scalar_one_or_none()
                 if user:
                     logger.debug(f"User {user_id} found.")
                 else:
@@ -146,7 +134,7 @@ class DatabaseManager:
                 logger.error(f"Error retrieving user {user_id}: {e}")
                 return None
 
-    def check_and_reset_sequence(self, table_name: str, primary_key: str) -> None:
+    async def check_and_reset_sequence(self, table_name: str, primary_key: str) -> None:
         """
         Checks and resets the sequence for the primary key if it is out of sync.
 
@@ -155,26 +143,30 @@ class DatabaseManager:
             primary_key (str): The primary key column name.
         """
         logger.info(f"Checking and resetting sequence for {table_name}.{primary_key}")
-        with self.session_factory() as session:
+        async with self.session_factory() as session:
             try:
-                max_id = session.execute(text(f"SELECT MAX({primary_key}) FROM {table_name}")).scalar()
-                next_val = session.execute(text(f"SELECT nextval(pg_get_serial_sequence('{table_name}', '{primary_key}'))")).scalar()
+                max_id_result = await session.execute(text(f"SELECT MAX({primary_key}) FROM {table_name}"))
+                max_id = max_id_result.scalar()
+                next_val_result = await session.execute(
+                    text(f"SELECT nextval(pg_get_serial_sequence('{table_name}', '{primary_key}'))"))
+                next_val = next_val_result.scalar()
                 logger.debug(f"Max ID: {max_id}, Next Value: {next_val}")
 
                 if max_id is not None and next_val is not None and max_id >= next_val:
                     new_val = max_id + 1
-                    session.execute(text(f"SELECT setval(pg_get_serial_sequence('{table_name}', '{primary_key}'), {new_val})"))
-                    session.commit()
+                    await session.execute(
+                        text(f"SELECT setval(pg_get_serial_sequence('{table_name}', '{primary_key}'), {new_val})"))
+                    await session.commit()
                     logger.info(f"Sequence for {table_name}.{primary_key} reset to {new_val}")
                 else:
                     logger.debug("No need to reset sequence.")
             except SQLAlchemyError as e:
                 logger.error(f"Error checking/resetting sequence for {table_name}.{primary_key}: {e}")
-                session.rollback()
+                await session.rollback()
                 raise
 
 
-def init_db(max_retries: int = 5, retry_delay: int = 5) -> None:
+async def init_db(max_retries: int = 5, retry_delay: int = 5) -> None:
     """
     Initializes the database by dropping and creating all tables.
 
@@ -187,31 +179,31 @@ def init_db(max_retries: int = 5, retry_delay: int = 5) -> None:
     logger.info("Initializing the database.")
     for attempt in range(1, max_retries + 1):
         try:
-            logger.debug("Dropping all tables.")
-            Base.metadata.drop_all(bind=engine)
-            logger.debug("Creating all tables.")
-            Base.metadata.create_all(bind=engine)
+            async with engine.begin() as conn:
+                logger.debug("Dropping all tables.")
+                await conn.run_sync(Base.metadata.drop_all)
+                logger.debug("Creating all tables.")
+                await conn.run_sync(Base.metadata.create_all)
             logger.info("Database tables dropped and created successfully.")
             return
         except SQLAlchemyError as e:
             logger.error(f"Error initializing database (Attempt {attempt}/{max_retries}): {e}")
             if attempt < max_retries:
                 logger.info(f"Retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
+                await asyncio.sleep(retry_delay)
             else:
                 logger.critical("Unable to initialize database after multiple attempts.")
                 raise ConnectionError("Unable to initialize database after multiple attempts.") from e
 
 
-def get_db() -> Generator[Session, None, None]:
-    """
-    Dependency that yields a database session and ensures it's closed after use.
-
-    Yields:
-        Generator[Session, None, None]: A SQLAlchemy Session instance.
-    """
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+@asynccontextmanager
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        except SQLAlchemyError as e:
+            await session.rollback()
+            logger.error(f"Database error: {e}")
+            raise
+        finally:
+            await session.close()
