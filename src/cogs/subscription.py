@@ -5,6 +5,7 @@ from typing import Optional
 
 import discord
 from discord.ext import commands
+from sqlalchemy.future import select
 
 from src.config.logger import LOGGING
 from src.config.settings import ConfigConstants
@@ -34,7 +35,8 @@ class SubscriptionCog(commands.Cog):
     async def send_dm(
         self, user: discord.User, content: str
     ) -> Optional[discord.Message]:
-        """Send a direct message to the user.
+        """
+        Send a direct message to the user.
 
         Args:
             user (discord.User): The user to send the DM to.
@@ -50,16 +52,24 @@ class SubscriptionCog(commands.Cog):
             logger.warning(
                 f"Cannot send DM to user {user.id}. They might have DMs disabled."
             )
-            await self.bot.get_channel(user.id).send(
-                f"{user.mention}, I couldn't send you a DM. "
-                f"Please ensure your privacy settings allow DMs from server members."
-            )
+            try:
+                channel = self.bot.get_channel(user.id)
+                if channel:
+                    await channel.send(
+                        f"{user.mention}, I couldn't send you a DM. "
+                        f"Please ensure your privacy settings allow DMs from server members."
+                    )
+            except Exception as e:
+                logger.error(
+                    f"Failed to send fallback message to user {user.id}: {e!s}"
+                )
             return None
 
     async def get_user_email(
         self, ctx: commands.Context
     ) -> Optional[str]:
-        """Prompt the user for their email and retrieve it.
+        """
+        Prompt the user for their email and retrieve it.
 
         Args:
             ctx (commands.Context): The context of the command.
@@ -103,7 +113,8 @@ class SubscriptionCog(commands.Cog):
     async def process_subscription(
         self, ctx: commands.Context, email: str
     ) -> Optional[int]:
-        """Process the user's subscription based on the provided email.
+        """
+        Process the user's subscription based on the provided email.
 
         Args:
             ctx (commands.Context): The context of the command.
@@ -151,7 +162,8 @@ class SubscriptionCog(commands.Cog):
     async def process_renewal(
         self, ctx: commands.Context, email: str, days: int
     ) -> bool:
-        """Process the renewal of the user's subscription.
+        """
+        Process the renewal of the user's subscription.
 
         Args:
             ctx (commands.Context): The context of the command.
@@ -189,10 +201,10 @@ class SubscriptionCog(commands.Cog):
         try:
             async with get_db() as db:
                 user = (
-                    await db.query(User)
-                    .filter(User.discord_id == str(ctx.author.id))
-                    .first()
-                )
+                    await db.execute(
+                        select(User).where(User.discord_id == str(ctx.author.id))
+                    )
+                ).scalar_one_or_none()
                 if user:
                     user.subscription_end = new_end_date
                     await db.commit()
@@ -248,7 +260,9 @@ class SubscriptionCog(commands.Cog):
         confirmation_message = await ctx.send(
             "📬 I've sent you a DM with instructions. Please check your Direct Messages."
         )
-        await confirmation_message.delete(delay=ConfigConstants.CONFIRM_DELETE_DELAY)
+        await confirmation_message.delete(
+            delay=ConfigConstants.CONFIRM_DELETE_DELAY
+        )
 
         dm_content = (
             "👋 **Hello!**\n\n"
@@ -291,8 +305,6 @@ class SubscriptionCog(commands.Cog):
 
         Args:
             days (int): Number of days to extend the subscription.
-            :param days: Number of days to extend the subscription.
-            :param ctx: The context of the command.
         """
         logger.info(
             f"Renew subscription command invoked by user {ctx.author.id} for {days} day(s)"
@@ -300,7 +312,9 @@ class SubscriptionCog(commands.Cog):
         confirmation_message = await ctx.send(
             "📬 I've sent you a DM with renewal instructions. Please check your Direct Messages."
         )
-        await confirmation_message.delete(delay=ConfigConstants.CONFIRM_DELETE_DELAY)
+        await confirmation_message.delete(
+            delay=ConfigConstants.CONFIRM_DELETE_DELAY
+        )
 
         dm_content = (
             "🔄 **Renew Subscription**\n\n"

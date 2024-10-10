@@ -24,9 +24,6 @@ def create_payment_intent(amount: int, currency: str, order_id: str) -> stripe.P
 
     Returns:
         stripe.PaymentIntent: The created PaymentIntent object.
-
-    Raises:
-        stripe.error.StripeError: If Stripe API call fails.
     """
     try:
         payment_intent = stripe.PaymentIntent.create(
@@ -109,7 +106,7 @@ def calculate_remaining_days(subscription: stripe.Subscription) -> int:
     return remaining_days
 
 
-def verify_payment_intent(payment_intent_id: str) -> bool:
+def verify_payment_intent(payment_intent_id: str) -> Optional[stripe.PaymentIntent]:
     """
     Verify the payment intent with Stripe.
 
@@ -117,17 +114,22 @@ def verify_payment_intent(payment_intent_id: str) -> bool:
         payment_intent_id (str): The PaymentIntent ID to verify.
 
     Returns:
-        bool: True if the payment intent is valid and in an acceptable status, False otherwise.
+        Optional[stripe.PaymentIntent]: The PaymentIntent object if valid, else None.
     """
     try:
         payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
         acceptable_statuses = ['succeeded', 'processing', 'requires_capture']
         if payment_intent.status in acceptable_statuses:
-            logger.info(f"PaymentIntent {payment_intent_id} verified successfully with status '{payment_intent.status}'.")
-            return True
+            logger.info(
+                f"PaymentIntent {payment_intent_id} verified successfully with status '{payment_intent.status}'."
+            )
+            return payment_intent
         else:
-            logger.warning(f"PaymentIntent {payment_intent_id} has unacceptable status '{payment_intent.status}'.")
-            return False
+            logger.warning(
+                f"PaymentIntent {payment_intent_id} has unacceptable status '{payment_intent.status}'."
+            )
+            return None
     except stripe.error.StripeError as e:
         logger.error(f"Error retrieving PaymentIntent {payment_intent_id}: {e}")
-        return False
+        return None
+

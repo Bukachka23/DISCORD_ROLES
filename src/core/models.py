@@ -13,7 +13,7 @@ class User(Base):
     __tablename__ = 'users'
 
     id = Column(Integer, primary_key=True)
-    discord_id = Column(String, unique=True, nullable=False)
+    discord_id = Column(Integer, unique=True, nullable=False)
     user_id = Column(Integer, unique=True, nullable=True)
     username = Column(String, nullable=True)
     subscription_start = Column(DateTime, nullable=True)
@@ -22,12 +22,7 @@ class User(Base):
     tickets = relationship("Ticket", back_populates="user")
 
     def set_subscription(self, subscription) -> None:
-        """
-        Set the subscription start and end dates for the user.
-
-        Args:
-            subscription: The subscription object containing start and end dates.
-        """
+        """Set the subscription start and end dates for the user."""
         self.subscription_start = subscription.start_date
         self.subscription_end = subscription.end_date
 
@@ -54,6 +49,7 @@ class Payment(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id'))
     payment_intent_id = Column(String, nullable=False)
+    order_id = Column(String, nullable=False, unique=True)
     confirmed = Column(Boolean, default=False)
     confirmation_image = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)

@@ -4,14 +4,12 @@ import logging.config
 import stripe
 from dotenv import load_dotenv
 
+from src.bot.discord_bot import DiscordBot
 from src.config.logger import LOGGING
 from src.config.settings import EnvSettings
 from src.core.database import init_db
-from src.bot.discord_bot import DiscordBot
-
 
 load_dotenv()
-
 
 logging.config.dictConfig(LOGGING)
 logger = logging.getLogger(__name__)

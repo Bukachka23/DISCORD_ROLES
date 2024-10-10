@@ -47,7 +47,7 @@ class ConfigConstants:
 
 
 WELCOME_MESSAGE_TEMPLATE = """
-@{username}, your payment has been verified and you have been assigned the @premium role for {days} days. 
+@{username}, your payment has been verified and you have been assigned the @premium role for {days} days.
 
 Welcome to the Foxian family!🦊
 

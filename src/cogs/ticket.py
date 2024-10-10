@@ -5,7 +5,7 @@ from typing import Optional
 
 import discord
 from discord.ext import commands
-from sqlalchemy import select
+from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.buttons.kb_amount_selection import AmountSelectionView
@@ -39,32 +39,30 @@ class TicketCog(commands.Cog):
         member = ctx.author
 
         async with get_db() as db:
-            try:
-                user = await self.get_user(db, str(member.id))
-                if not user:
-                    await ctx.send(f"{member.mention}, you do not have any tickets.")
-                    return
+            user = await self.get_user(db, str(member.id))
+            if not user:
+                await ctx.send(f"{member.mention}, you do not have any tickets.")
+                return
 
-                existing_ticket = await self.get_existing_ticket(db, user.id)
-                if not existing_ticket:
-                    await ctx.send(f"{member.mention}, you do not have any open tickets.")
-                    return
+            existing_ticket = await self.get_existing_ticket(db, user.id)
+            if not existing_ticket:
+                await ctx.send(f"{member.mention}, you do not have any open tickets.")
+                return
 
-                ticket_channel = guild.get_channel(int(existing_ticket.channel_id))
-                if ticket_channel:
-                    await ticket_channel.delete()
-                    logger.info(f"Deleted ticket channel {ticket_channel.name} for user {member}")
-                else:
-                    logger.warning(f"Ticket channel with ID {existing_ticket.channel_id} not found.")
+            ticket_channel = guild.get_channel(int(existing_ticket.channel_id))
+            if ticket_channel:
+                await ticket_channel.delete()
+                logger.info(f"Deleted ticket channel {ticket_channel.name} for user {member}")
+            else:
+                logger.warning(f"Ticket channel with ID {existing_ticket.channel_id} not found.")
 
-                existing_ticket.deleted_at = datetime.utcnow()
-                await db.commit()
+            existing_ticket.deleted_at = datetime.utcnow()
+            await db.commit()
 
-                await ctx.send(f"{member.mention}, your ticket has been deleted successfully. "
-                               "If you need further assistance, feel free to create a new ticket.")
-            except Exception as e:
-                logger.error(f"Error deleting ticket for user {ctx.author.id}: {e!s}", exc_info=True)
-                await ctx.send("⚠️ **An error occurred** while deleting the ticket. Please try again later.")
+            await ctx.send(
+                f"{member.mention}, your ticket has been deleted successfully. "
+                "If you need further assistance, feel free to create a new ticket."
+            )
 
     @commands.command(name='restart_payment')
     async def restart_payment(self, ctx: commands.Context) -> None:
@@ -74,22 +72,18 @@ class TicketCog(commands.Cog):
         user_id = str(ctx.author.id)
 
         async with get_db() as db:
-            try:
-                user = await self.get_user(db, user_id)
-                if not user:
-                    await ctx.send("⚠️ You do not have an open ticket.")
-                    return
+            user = await self.get_user(db, user_id)
+            if not user:
+                await ctx.send("⚠️ You do not have an open ticket.")
+                return
 
-                existing_ticket = await self.get_existing_ticket(db, user.id, channel.id)
-                if not existing_ticket:
-                    await ctx.send("⚠️ This is not your ticket channel.")
-                    return
+            existing_ticket = await self.get_existing_ticket(db, user.id, channel.id)
+            if not existing_ticket:
+                await ctx.send("⚠️ This is not your ticket channel.")
+                return
 
-                await ctx.send("🔄 Restarting the payment verification process...")
-                await self.start_ticket_conversation(channel, user_id)
-            except Exception as e:
-                logger.error(f"Error restarting payment for user {user_id}: {e!s}", exc_info=True)
-                await ctx.send("⚠️ An error occurred while restarting the payment process. Please try again later.")
+            await ctx.send("🔄 Restarting the payment verification process...")
+            await self.start_ticket_conversation(channel, user_id)
 
     @commands.command(name='start_payment')
     async def start_payment(self, ctx: commands.Context) -> None:
@@ -102,45 +96,43 @@ class TicketCog(commands.Cog):
         guild = ctx.guild
 
         async with get_db() as db:
-            try:
-                user = await self.get_or_create_user(db, user_id)
-                existing_ticket = await self.get_existing_ticket(db, user.id)
+            user = await self.get_or_create_user(db, user_id)
+            existing_ticket = await self.get_existing_ticket(db, user.id)
 
-                if existing_ticket:
-                    ticket_channel = guild.get_channel(int(existing_ticket.channel_id))
-                    if ticket_channel:
-                        await ctx.send(
-                            f"{ctx.author.mention}, you already have an open ticket: {ticket_channel.mention}\n"
-                            "Please use this channel to continue your payment verification."
-                        )
-                        logger.info(f"User <@{user_id}> already has an open ticket: <#{existing_ticket.channel_id}>")
-                        return
-                    else:
-                        existing_ticket.deleted_at = datetime.utcnow()
-                        await db.commit()
-                        logger.warning("Found ticket in database but channel does not exist. Marked as deleted.")
+            if existing_ticket:
+                ticket_channel = guild.get_channel(int(existing_ticket.channel_id))
+                if ticket_channel:
+                    await ctx.send(
+                        f"{ctx.author.mention}, you already have an open ticket: {ticket_channel.mention}\n"
+                        "Please use this channel to continue your payment verification."
+                    )
+                    logger.info(f"User <@{user_id}> already has an open ticket: <#{existing_ticket.channel_id}>")
+                    return
+                else:
+                    existing_ticket.deleted_at = datetime.utcnow()
+                    await db.commit()
+                    logger.warning("Found ticket in database but channel does not exist. Marked as deleted.")
 
-                ticket_channel = await self.create_ticket_channel(guild, ctx.author)
-                new_ticket = Ticket(
-                    channel_id=str(ticket_channel.id),
-                    user_id=user.id,
-                    created_at=datetime.utcnow(),
-                )
-                db.add(new_ticket)
-                await db.commit()
+            ticket_channel = await self.create_ticket_channel(guild, ctx.author)
+            new_ticket = Ticket(
+                channel_id=str(ticket_channel.id),
+                user_id=user.id,
+                created_at=datetime.utcnow(),
+            )
+            db.add(new_ticket)
+            await db.commit()
 
-                await ticket_channel.send(
-                    f"{ctx.author.mention}, your ticket has been created. "
-                    "Let's start the **payment verification** process.\n\n"
-                    "Please keep the invoice received on email with you."
-                )
-                await ctx.send(f"{ctx.author.mention}, your ticket has been created: {ticket_channel.mention}\nPlease "
-                               "follow the instructions in the ticket to complete your payment verification.")
+            await ticket_channel.send(
+                f"{ctx.author.mention}, your ticket has been created. "
+                "Let's start the **payment verification** process.\n\n"
+                "Please keep the invoice received on email with you."
+            )
+            await ctx.send(
+                f"{ctx.author.mention}, your ticket has been created: {ticket_channel.mention}\nPlease "
+                "follow the instructions in the ticket to complete your payment verification."
+            )
 
-                await self.start_ticket_conversation(ticket_channel, user_id)
-            except Exception as e:
-                logger.error(f"Error creating ticket for user {user_id}: {e!s}", exc_info=True)
-                await ctx.send("⚠️ **An error occurred** while creating the ticket. Please try again later.")
+            await self.start_ticket_conversation(ticket_channel, user_id)
 
     async def start_ticket_conversation(self, channel: discord.TextChannel, user_id: str) -> None:
         """Start the conversation with the user to verify payment details."""
@@ -181,6 +173,7 @@ class TicketCog(commands.Cog):
             await channel.send("An error occurred during the payment process. Please contact support for assistance.")
 
     async def select_currency(self, channel: discord.TextChannel, user_id: str) -> Optional[str]:
+        """Prompt the user to select a currency."""
         currency_view = CurrencyView()
         await channel.send(
             f"<@{user_id}>, **Step 1: Select Your Payment Currency**\n\n"
@@ -193,11 +186,14 @@ class TicketCog(commands.Cog):
             return None
         return currency_view.value
 
-    async def select_amount(self, channel: discord.TextChannel, user_id: str, currency: str) -> Optional[float]:
+    async def select_amount(
+        self, channel: discord.TextChannel, user_id: str, currency: str
+    ) -> Optional[float]:
+        """Prompt the user to select the payment amount."""
         amounts = [59.95, 168.95, 666.95]
         amount_view = AmountSelectionView(amounts)
         await channel.send(
-            f"<@{user_id}>,**Step 2: Select the Payment Amount**\n\n"
+            f"<@{user_id}>, **Step 2: Select the Payment Amount**\n\n"
             f"You have selected **{currency}** as your payment currency.\n"
             "Please select the amount you have paid from the options below:",
             view=amount_view
@@ -209,6 +205,7 @@ class TicketCog(commands.Cog):
         return amount_view.value
 
     async def provide_order_id(self, channel: discord.TextChannel, user_id: str) -> Optional[str]:
+        """Prompt the user to provide their Order ID."""
         order_id_view = OrderIDView()
         await channel.send(
             f"<@{user_id}>, **Step 3: Provide Your Order ID**\n\n"
@@ -221,8 +218,10 @@ class TicketCog(commands.Cog):
             return None
         return order_id_view.value
 
-    async def confirm_payment(self, channel: discord.TextChannel, user_id: str, amount: float, currency: str,
-                              order_id: str) -> Optional[str]:
+    async def confirm_payment(
+        self, channel: discord.TextChannel, user_id: str, amount: float, currency: str, order_id: str
+    ) -> Optional[str]:
+        """Confirm the payment with the user."""
         payment_intent = create_payment_intent(int(amount * 100), currency.lower(), order_id)
         await channel.send(
             f"<@{user_id}>, **Step 4: Confirm Your Payment**\n\n"
@@ -242,15 +241,17 @@ class TicketCog(commands.Cog):
 
         return payment_intent.id
 
-    async def upload_payment_confirmation(self, channel: discord.TextChannel, user_id: str,
-                                          payment_intent_id: str) -> Optional[str]:
+    async def upload_payment_confirmation(
+        self, channel: discord.TextChannel, user_id: str, payment_intent_id: str
+    ) -> Optional[str]:
+        """Prompt the user to upload their payment confirmation."""
         await channel.send(
             "Please upload your payment confirmation image along with the PaymentIntent ID in this channel.\n\n"
             "🔗 *Example:* pi_1Hh1XYZAbCdEfGhIjKlMnOpQ"
         )
 
         def payment_check(m):
-            return m.author.id == int(user_id) and m.channel == channel and len(m.attachments) > 0
+            return m.author.id == int(user_id) and m.channel == channel and m.attachments
 
         try:
             payment_msg = await self.bot.wait_for('message', check=payment_check, timeout=300.0)
@@ -263,8 +264,10 @@ class TicketCog(commands.Cog):
             await self.handle_timeout(channel, "You didn't provide payment confirmation in time.")
             return None
 
-    async def notify_admins(self, channel: discord.TextChannel, user_id: str, amount: float, currency: str,
-                            order_id: str, payment_intent_id: str, image_url: str) -> None:
+    async def notify_admins(
+        self, channel: discord.TextChannel, user_id: str, amount: float, currency: str,
+        order_id: str, payment_intent_id: str, image_url: str
+    ) -> None:
         """Notify admins about the new payment confirmation."""
         admin_channel = self.bot.get_channel(self.admin_user_id)
 
@@ -294,25 +297,26 @@ class TicketCog(commands.Cog):
         )
 
     @staticmethod
-    async def get_user(db, discord_id: str) -> Optional[User]:
+    async def get_user(db: AsyncSession, discord_id: str) -> Optional[User]:
         """Retrieve a user from the database."""
-        return db.query(User).filter(User.discord_id == str(discord_id)).first()
+        result = await db.execute(select(User).filter(User.discord_id == discord_id))
+        return result.scalar_one_or_none()
 
     async def get_or_create_user(self, db: AsyncSession, discord_id: str) -> User:
         """Get or create a user in the database."""
-        result = await db.execute(select(User).filter(User.discord_id == str(discord_id)))
-        user = result.scalar_one_or_none()
+        user = await self.get_user(db, discord_id)
         if not user:
-            user = User(discord_id=str(discord_id))
+            user = User(discord_id=int(discord_id))
             db.add(user)
             await db.commit()
             logger.debug(f"Created new user in database with Discord ID {discord_id}")
         return user
 
-    async def get_existing_ticket(self, db: AsyncSession, user_id: int, channel_id: Optional[int] = None) -> Optional[
-        Ticket]:
+    async def get_existing_ticket(
+        self, db: AsyncSession, user_id: int, channel_id: Optional[int] = None
+    ) -> Optional[Ticket]:
         """Retrieve an existing ticket for a user."""
-        query = select(Ticket).filter(
+        query = select(Ticket).where(
             Ticket.user_id == user_id,
             Ticket.closed_at.is_(None)
         )

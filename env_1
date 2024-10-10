@@ -1,0 +1,159 @@
+openapi: 3.0.0
+info:
+  title: CoinMarketCap API
+  description: API to get cryptocurrency historical OHLCV data from CoinMarketCap.
+  version: 1.0.0
+  contact:
+    name: CoinMarketCap
+    url: https://coinmarketcap.com/api/documentation/v1/
+servers:
+  - url: https://pro-api.coinmarketcap.com
+    description: Main (production) server
+
+paths:
+  /v2/cryptocurrency/ohlcv/historical:
+    get:
+      summary: Get Historical OHLCV Data
+      description: Retrieve historical OHLCV (Open, High, Low, Close, Volume) market values for a cryptocurrency.
+      parameters:
+        - name: id
+          in: query
+          description: The CoinMarketCap cryptocurrency ID.
+          required: true
+          schema:
+            type: integer
+        - name: convert
+          in: query
+          description: The target currency for market data conversion.
+          required: false
+          schema:
+            type: string
+            default: "USD"
+        - name: time_start
+          in: query
+          description: Start date for fetching historical data (ISO 8601).
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: time_end
+          in: query
+          description: End date for fetching historical data (ISO 8601).
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: interval
+          in: query
+          description: Time interval between data points.
+          required: false
+          schema:
+            type: string
+            enum: [daily, weekly, monthly]
+            default: "daily"
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+                        example: 1
+                      name:
+                        type: string
+                        example: "Bitcoin"
+                      symbol:
+                        type: string
+                        example: "BTC"
+                      quotes:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            time_open:
+                              type: string
+                              format: date-time
+                              example: "2021-01-01T00:00:00.000Z"
+                            time_close:
+                              type: string
+                              format: date-time
+                              example: "2021-01-01T23:59:59.999Z"
+                            time_high:
+                              type: string
+                              format: date-time
+                              example: "2021-01-01T14:30:00.000Z"
+                            time_low:
+                              type: string
+                              format: date-time
+                              example: "2021-01-01T03:15:00.000Z"
+                            quote:
+                              type: object
+                              properties:
+                                USD:
+                                  type: object
+                                  properties:
+                                    open:
+                                      type: number
+                                      example: 29022.42
+                                    high:
+                                      type: number
+                                      example: 29600.63
+                                    low:
+                                      type: number
+                                      example: 28803.59
+                                    close:
+                                      type: number
+                                      example: 29374.15
+                                    volume:
+                                      type: number
+                                      example: 8378450000
+                  status:
+                    type: object
+                    properties:
+                      timestamp:
+                        type: string
+                        format: date-time
+                        description: Time of the response
+                        example: "2021-08-01T22:51:28.209Z"
+                      error_code:
+                        type: integer
+                        description: Error code (0 means no error)
+                        example: 0
+                      error_message:
+                        type: string
+                        description: Error message, if any
+                        example: ""
+                      elapsed:
+                        type: integer
+                        description: Time taken for the request in milliseconds
+                        example: 10
+                      credit_count:
+                        type: integer
+                        description: Number of credits used for the request
+                        example: 1
+        '400':
+          description: Bad request (invalid parameters)
+        '401':
+          description: Unauthorized - Invalid API Key
+        '404':
+          description: Cryptocurrency ID not found
+        '429':
+          description: Too many requests
+        '500':
+          description: Internal server error
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-CMC_PRO_API_KEY
+
+security:
+  - ApiKeyAuth: []

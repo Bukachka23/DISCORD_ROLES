@@ -19,7 +19,9 @@ logger = logging.getLogger(__name__)
 class DiscordBot(commands.Bot):
     """Custom Discord bot with extended functionalities."""
 
-    def __init__(self, command_prefix: str, premium_role_id: int, admin_user_id: int):
+    def __init__(
+        self, command_prefix: str, premium_role_id: int, admin_user_id: int
+    ):
         intents = discord.Intents.default()
         intents.message_content = True
         intents.members = True
@@ -30,7 +32,7 @@ class DiscordBot(commands.Bot):
         self.admin_user_id = admin_user_id
 
     @staticmethod
-    async def health_check(_) -> web.Response:
+    async def health_check(_: web.Request) -> web.Response:
         """
         Health check endpoint for the HTTP server.
 
@@ -42,18 +44,20 @@ class DiscordBot(commands.Bot):
             db.execute("SELECT 1")
             db.close()
             logger.info("Database connection successful")
-            return web.json_response({'status': 'ok'})
+            return web.json_response({"status": "ok"})
         except Exception as e:
             logger.error(f"Health check failed: {e!s}")
-            return web.json_response({'status': 'error', 'message': str(e)}, status=500)
+            return web.json_response(
+                {"status": "error", "message": str(e)}, status=500
+            )
 
     async def start_http_server(self) -> None:
         """Start the HTTP server for health checks."""
         app = web.Application()
-        app.router.add_get('/health', self.health_check)
+        app.router.add_get("/health", self.health_check)
         runner = web.AppRunner(app)
         await runner.setup()
-        site = web.TCPSite(runner, '0.0.0.0', 8080)
+        site = web.TCPSite(runner, "0.0.0.0", 8080)
         await site.start()
         logger.info("HTTP server started for health checks on port 8080")
 
@@ -62,9 +66,15 @@ class DiscordBot(commands.Bot):
         Set up the bot by adding cogs and loading commands.
         This method is called before the bot starts.
         """
-        payment_cog = PaymentCog(self, self.premium_role_id, self.admin_user_id)
-        subscription_cog = SubscriptionCog(self, self.premium_role_id, self.admin_user_id)
-        ticket_cog = TicketCog(self, self.premium_role_id, self.admin_user_id)
+        payment_cog = PaymentCog(
+            self, self.premium_role_id, self.admin_user_id
+        )
+        subscription_cog = SubscriptionCog(
+            self, self.premium_role_id, self.admin_user_id
+        )
+        ticket_cog = TicketCog(
+            self, self.premium_role_id, self.admin_user_id
+        )
         message_handler = MessageHandler(self)
 
         await self.add_cog(payment_cog)
@@ -77,33 +87,72 @@ class DiscordBot(commands.Bot):
 
     async def on_ready(self) -> None:
         """Log bot information when it is ready."""
-        self.logger.info(f'{self.user} has connected to Discord!')
-        self.logger.info(f'Guilds: {", ".join([guild.name for guild in self.guilds])}')
-        self.logger.info(f'Command prefix: {self.command_prefix}')
-        self.logger.info(f'Registered commands: {", ".join([cmd.name for cmd in self.commands])}')
+        self.logger.info(f"{self.user} has connected to Discord!")
+        guild_names = ", ".join([guild.name for guild in self.guilds])
+        self.logger.info(f"Guilds: {guild_names}")
+        self.logger.info(f"Command prefix: {self.command_prefix}")
+        command_names = ", ".join([cmd.name for cmd in self.commands])
+        self.logger.info(f"Registered commands: {command_names}")
 
-    async def on_command_error(self, ctx: commands.Context, error: commands.CommandError) -> None:
+    async def on_command_error(
+        self, ctx: commands.Context, error: commands.CommandError
+    ) -> None:
         """
         Handle command errors.
 
         Provides user feedback and logs the error for debugging.
         """
         if isinstance(error, commands.CommandNotFound):
-            await ctx.author.send(f"Invalid command: `{ctx.message.content}`. Please try again.")
-            self.logger.warning(f"Invalid command used: {ctx.message.content}")
-
+            await self.handle_command_not_found(ctx)
         elif isinstance(error, commands.MissingRequiredArgument):
-            await ctx.author.send(f"Missing required argument: `{error.param.name}`.")
-            self.logger.warning(f"Missing required argument in command: {error}")
-
+            await self.handle_missing_argument(ctx, error)
         elif isinstance(error, commands.CommandInvokeError):
-            if isinstance(error.original, asyncio.TimeoutError):
-                await ctx.author.send("The command timed out. Please try again.")
-                self.logger.warning(f"Command timed out: {ctx.command.name}")
-            else:
-                await ctx.author.send(f"An error occurred: `{error.original}`.")
-                self.logger.error(f"Command invoke error in `{ctx.command.name}`: {error.original}", exc_info=True)
-
+            await self.handle_command_invoke_error(ctx, error)
         else:
-            await ctx.author.send(f"An unexpected error occurred: `{error}`.")
-            self.logger.error(f"Unexpected error in `{ctx.command}`: {error}", exc_info=True)
+            await self.handle_unexpected_error(ctx, error)
+
+    async def handle_command_not_found(self, ctx: commands.Context) -> None:
+        """Handle CommandNotFound errors."""
+        await ctx.author.send(
+            f"Invalid command: {ctx.message.content}. Please try again."
+        )
+        self.logger.warning(f"Invalid command used: {ctx.message.content}")
+
+    async def handle_missing_argument(
+        self, ctx: commands.Context, error: commands.MissingRequiredArgument
+    ) -> None:
+        """Handle MissingRequiredArgument errors."""
+        await ctx.author.send(
+            f"Missing required argument: {error.param.name}."
+        )
+        self.logger.warning(f"Missing required argument in command: {error}")
+
+    async def handle_command_invoke_error(
+        self, ctx: commands.Context, error: commands.CommandInvokeError
+    ) -> None:
+        """Handle CommandInvokeError errors."""
+        if isinstance(error.original, asyncio.TimeoutError):
+            await ctx.author.send("The command timed out. Please try again.")
+            self.logger.warning(
+                f"Command timed out: {ctx.command.name}"
+            )
+        else:
+            await ctx.author.send(
+                f"An error occurred: {error.original}."
+            )
+            self.logger.error(
+                f"Command invoke error in {ctx.command.name}: {error.original}",
+                exc_info=True,
+            )
+
+    async def handle_unexpected_error(
+        self, ctx: commands.Context, error: commands.CommandError
+    ) -> None:
+        """Handle unexpected errors."""
+        await ctx.author.send(
+            f"An unexpected error occurred: {error}."
+        )
+        self.logger.error(
+            f"Unexpected error in {ctx.command}: {error}",
+            exc_info=True,
+        )

@@ -8,7 +8,6 @@ from src.cogs.payment import PaymentCog
 from src.cogs.ticket import TicketCog
 from src.config.logger import LOGGING
 
-
 logging.config.dictConfig(LOGGING)
 logger = logging.getLogger(__name__)
 
@@ -37,16 +36,20 @@ class MessageHandler(commands.Cog):
         ctx = await self.bot.get_context(message)
 
         if isinstance(message.channel, discord.TextChannel):
-            if message.channel.name.startswith('ticket-'):
-                if 'pi_' in message.content and message.attachments:
-                    logger.info(f"Processing payment confirmation from user {message.author.id}")
-                    payment_cog: Optional[PaymentCog] = self.bot.get_cog('PaymentCog')
+            if message.channel.name.startswith("ticket-"):
+                if "pi_" in message.content and message.attachments:
+                    logger.info(
+                        f"Processing payment confirmation from user {message.author.id}"
+                    )
+                    payment_cog: Optional[PaymentCog] = self.bot.get_cog(
+                        "PaymentCog"
+                    )
                     if payment_cog:
                         await payment_cog.check_payment(ctx)
                     else:
                         logger.error("PaymentCog not found.")
-            elif message.content.lower() in {'payment verification', 'verify payment'}:
-                ticket_cog: Optional[TicketCog] = self.bot.get_cog('TicketCog')
+            elif message.content.lower() in {"payment verification", "verify payment"}:
+                ticket_cog: Optional[TicketCog] = self.bot.get_cog("TicketCog")
                 if ticket_cog:
                     await ticket_cog.create_ticket(ctx, str(message.author.id))
                 else:
